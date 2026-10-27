@@ -12,4 +12,5 @@ urlpatterns = [
     path('api/catalogo/', include('apps.catalogo.urls')),
     path('api/agenda/', include('apps.agenda.urls')),
     path('', TemplateView.as_view(template_name='index.html'), name='home'),
+    path('api/auth/', include('apps.usuarios.urls')),
 ]

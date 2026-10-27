@@ -16,6 +16,9 @@
     authTab: 'login',
     sel: { servico: null, profissional: null, data: '', hora: '' },
     confirmado: null,
+    token2fa: null,
+    fotoNova: null,
+    fotoPreview: null,
   };
 
   var app = document.getElementById('app');
@@ -67,6 +70,98 @@
       .map(function (p) { return p[0]; }).join('').toUpperCase();
   }
 
+  /* ---------- Máscaras e validações (CPF, CEP, telefone, data) ---------- */
+  function soDigitos(s) { return String(s == null ? '' : s).replace(/\D/g, ''); }
+
+  function mascaraCPF(v) {
+    var d = soDigitos(v).slice(0, 11), o = d.slice(0, 3);
+    if (d.length > 3) o += '.' + d.slice(3, 6);
+    if (d.length > 6) o += '.' + d.slice(6, 9);
+    if (d.length > 9) o += '-' + d.slice(9, 11);
+    return o;
+  }
+
+  function mascaraCEP(v) {
+    var d = soDigitos(v).slice(0, 8);
+    return d.length > 5 ? d.slice(0, 5) + '-' + d.slice(5) : d;
+  }
+
+  function mascaraTel(v) {
+    var d = soDigitos(v).slice(0, 11);
+    if (!d.length) return '';
+    if (d.length <= 2) return '(' + d;
+    var ddd = '(' + d.slice(0, 2) + ') ';
+    if (d.length <= 6) return ddd + d.slice(2);
+    var corte = d.length > 10 ? 7 : 6;
+    return ddd + d.slice(2, corte) + '-' + d.slice(corte);
+  }
+
+  function mascaraData(v) {
+    var d = soDigitos(v).slice(0, 8), o = d.slice(0, 2);
+    if (d.length > 2) o += '/' + d.slice(2, 4);
+    if (d.length > 4) o += '/' + d.slice(4);
+    return o;
+  }
+
+  function mascaraCodigo(v) { return soDigitos(v).slice(0, 6); }
+
+  var MASCARAS = { cpf: mascaraCPF, cep: mascaraCEP, tel: mascaraTel, data: mascaraData, cod: mascaraCodigo };
+
+  function cpfValido(c) {
+    var d = soDigitos(c);
+    if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+    for (var t = 9; t < 11; t++) {
+      var soma = 0;
+      for (var i = 0; i < t; i++) soma += Number(d[i]) * (t + 1 - i);
+      if (((soma * 10) % 11) % 10 !== Number(d[t])) return false;
+    }
+    return true;
+  }
+
+  // 'dd/mm/aaaa' -> 'aaaa-mm-dd' (ou null se a data não existir / for futura)
+  function dataParaISO(br) {
+    var m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(br || '');
+    if (!m) return null;
+    var d = new Date(+m[3], +m[2] - 1, +m[1]);
+    if (d.getFullYear() !== +m[3] || d.getMonth() !== +m[2] - 1 || d.getDate() !== +m[1]) return null;
+    if (+m[3] < 1900 || d > new Date()) return null;
+    return m[3] + '-' + m[2] + '-' + m[1];
+  }
+
+  function dataDeISO(iso) {
+    return iso ? fmtDataCurta(String(iso).slice(0, 10)) : '';
+  }
+
+  // Preenche rua/bairro/cidade/estado a partir do CEP (ViaCEP). Falhas são silenciosas.
+  function buscarCep(input) {
+    var cep = soDigitos(input.value);
+    var form = input.form;
+    if (cep.length !== 8 || !form || input.dataset.cepBuscado === cep) return;
+    input.dataset.cepBuscado = cep;
+    fetch('https://viacep.com.br/ws/' + cep + '/json/')
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || j.erro || soDigitos(input.value) !== cep) return;
+        var mapa = { rua: j.logradouro, bairro: j.bairro, cidade: j.localidade, estado: j.uf };
+        Object.keys(mapa).forEach(function (k) {
+          if (form.elements[k] && mapa[k]) form.elements[k].value = mapa[k];
+        });
+      })
+      .catch(function () { input.dataset.cepBuscado = ''; });
+  }
+
+  function haTempo(iso) {
+    var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    function plural(n, um, varios) { return 'há ' + n + ' ' + (n === 1 ? um : varios); }
+    if (isNaN(s)) return '';
+    if (s < 60) return 'há menos de um minuto';
+    if (s < 3600) return plural(Math.floor(s / 60), 'minuto', 'minutos');
+    if (s < 86400) return plural(Math.floor(s / 3600), 'hora', 'horas');
+    if (s < 86400 * 30) return plural(Math.floor(s / 86400), 'dia', 'dias');
+    if (s < 86400 * 365) return plural(Math.floor(s / (86400 * 30)), 'mês', 'meses');
+    return plural(Math.floor(s / (86400 * 365)), 'ano', 'anos');
+  }
+
   var toastTimer;
   function toast(msg) {
     toastEl.textContent = msg;
@@ -75,7 +170,9 @@
     toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 3500);
   }
 
-  var CAMPOS = { nome: 'Nome', email: 'E-mail', telefone: 'Telefone', password: 'Senha', inicio: 'Horário', servico: 'Serviço', profissional: 'Profissional', cliente: 'Cliente', descricao: 'Descrição', duracao_minutos: 'Duração', preco: 'Preço', servicos: 'Serviços', intervalo_minutos: 'Intervalo', usuario: 'Usuário' };
+  var CAMPOS = { nome: 'Nome', email: 'E-mail', telefone: 'Telefone', password: 'Senha', inicio: 'Horário', servico: 'Serviço', profissional: 'Profissional', cliente: 'Cliente', descricao: 'Descrição', duracao_minutos: 'Duração', preco: 'Preço', servicos: 'Serviços', intervalo_minutos: 'Intervalo', usuario: 'Usuário', horarios: 'Dias de trabalho', comissao_percentual: 'Comissão',
+    cpf: 'CPF', cep: 'CEP', rua: 'Rua', numero: 'Número', complemento: 'Complemento', cidade: 'Cidade', bairro: 'Bairro', estado: 'Estado',
+    data_nascimento: 'Data de nascimento', foto: 'Foto', senha_atual: 'Senha atual', nova_senha: 'Nova senha', codigo: 'Código' };
 
   function mensagemErro(data) {
     if (!data) return 'Algo deu errado. Tente novamente.';
@@ -96,7 +193,7 @@
   function ApiError(status, data) {
     this.status = status;
     this.data = data;
-    this.message = mensagemErro(data);
+    this.message = (status === 404 && !data) ? 'Recurso ainda não disponível no servidor.' : mensagemErro(data);
   }
 
   function renovarToken() {
@@ -119,13 +216,14 @@
   function api(path, opts) {
     opts = opts || {};
     var auth = opts.auth !== false;
-    var headers = { 'Content-Type': 'application/json' };
+    var multipart = typeof FormData !== 'undefined' && opts.body instanceof FormData;
+    var headers = multipart ? {} : { 'Content-Type': 'application/json' };
     if (auth && state.access) headers.Authorization = 'Bearer ' + state.access;
 
     return fetch(path, {
       method: opts.method || 'GET',
       headers: headers,
-      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      body: opts.body ? (multipart ? opts.body : JSON.stringify(opts.body)) : undefined,
     }).then(function (res) {
       if (res.status === 401 && auth && !opts.jaTentou) {
         return renovarToken().then(function (ok) {
@@ -146,17 +244,43 @@
   /* ------------------------------------------------------------
      Autenticação
   ------------------------------------------------------------ */
+  function concluirLogin(d) {
+    state.access = d.access;
+    state.refresh = d.refresh;
+    state.token2fa = null;
+    save('access', d.access);
+    save('refresh', d.refresh);
+    return carregarPerfil();
+  }
+
   function entrar(email, password) {
     return api('/api/auth/login/', { method: 'POST', auth: false, body: { email: email, password: password } })
       .then(function (d) {
-        state.access = d.access;
-        state.refresh = d.refresh;
-        save('access', d.access);
-        save('refresh', d.refresh);
-        return carregarPerfil();
+        // Conta com verificação em duas etapas: o servidor ainda não entregou os tokens.
+        if (d && d.requer_2fa) {
+          state.token2fa = d.token_2fa;
+          state.authTab = '2fa';
+          return renderHome();
+        }
+        return concluirLogin(d);
       }, function (e) {
         if (e.status === 401) throw new ApiError(401, { detail: 'E-mail ou senha incorretos.' });
         throw e;
+      });
+  }
+
+  function verificar2faLogin(form) {
+    var erro = document.getElementById('auth-erro');
+    var btn = form.querySelector('button[type=submit]');
+    var codigo = mascaraCodigo(form.elements.codigo.value);
+    erro.innerHTML = '';
+    if (codigo.length !== 6) { erro.innerHTML = '<div class="alert">Digite o código de 6 dígitos.</div>'; return; }
+    btn.disabled = true;
+    api('/api/auth/2fa/verificar/', { method: 'POST', auth: false, body: { token_2fa: state.token2fa, codigo: codigo } })
+      .then(concluirLogin)
+      .catch(function (e) {
+        erro.innerHTML = '<div class="alert">' + esc(e.message) + '</div>';
+        btn.disabled = false;
       });
   }
 
@@ -172,6 +296,10 @@
     state.access = state.refresh = null;
     state.user = null;
     state.view = 'home';
+    state.authTab = 'login';
+    state.token2fa = null;
+    state.fotoNova = null;
+    state.fotoPreview = null;
     state.confirmado = null;
     resetSelecao();
     save('access', null);
@@ -198,6 +326,7 @@
 
   /* ---------- Menu lateral ---------- */
   var ICO = {
+    chart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 20V10h3v10H4zm6.5 0V4h3v16h-3zM17 20v-7h3v7h-3z"/></svg>',
     menu: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/></svg>',
     home: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3 2 12h3v8h5v-5h4v5h5v-8h3L12 3z"/></svg>',
     cal: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zM5 10h14v10H5V10z"/></svg>',
@@ -205,21 +334,47 @@
     exit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h5v-2H6V6h4V4zm6.6 4.6L15.2 10l1 1H9v2h7.2l-1 1 1.4 1.4L20 12l-3.4-3.4z"/></svg>',
     tag: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M3 4a1 1 0 0 1 1-1h7l10 10-8 8L3 11V4zm4.5 2a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg>',
     users: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-3.3 0-7 1.7-7 4v2h14v-2c0-2.3-3.7-4-7-4zm7-2a3 3 0 1 0-1-5.8 5 5 0 0 1 0 5.6c.3.1.6.2 1 .2zm.5 2.1c1.9.6 3.5 1.8 3.5 3.9v2h4v-2c0-1.9-3.1-3.4-7.5-3.9z"/></svg>',
-    gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M10.3 2h3.4l.5 2.6 1.8.8 2.2-1.5 2.4 2.4-1.5 2.2.8 1.8L22 10.3v3.4l-2.6.5-.8 1.8 1.5 2.2-2.4 2.4-2.2-1.5-1.8.8-.5 2.6h-3.4l-.5-2.6-1.8-.8-2.2 1.5-2.4-2.4 1.5-2.2-.8-1.8L2 13.7v-3.4l2.6-.5.8-1.8-1.5-2.2 2.4-2.4 2.2 1.5 1.8-.8L10.3 2zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>'
+    gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M10.3 2h3.4l.5 2.6 1.8.8 2.2-1.5 2.4 2.4-1.5 2.2.8 1.8L22 10.3v3.4l-2.6.5-.8 1.8 1.5 2.2-2.4 2.4-2.2-1.5-1.8.8-.5 2.6h-3.4l-.5-2.6-1.8-.8-2.2 1.5-2.4-2.4 1.5-2.2-.8-1.8L2 13.7v-3.4l2.6-.5.8-1.8-1.5-2.2 2.4-2.4 2.2 1.5 1.8-.8L10.3 2zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>',
+    user: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"/></svg>',
+    shield: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>',
+    bell: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4a1.5 1.5 0 0 0-3 0v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>',
+    lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M18 8h-1V6a5 5 0 0 0-10 0v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zm-6 9a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm3.1-9H8.9V6a3.1 3.1 0 0 1 6.2 0v2z"/></svg>',
+    key: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.65 10A6 6 0 1 0 7 18a6 6 0 0 0 5.65-4H17v4h4v-4h2v-4H12.65zM7 14a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>',
+    laptop: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20 18c1.1 0 1.99-.9 1.99-2L22 6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/></svg>',
+    desktop: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M21 2H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7v2H8v2h8v-2h-2v-2h7a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm0 14H3V4h18v12z"/></svg>',
+    phone: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17 1H7a2 2 0 0 0-2 2v18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm0 18H7V5h10v14z"/></svg>',
+    warn: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>',
+    shieldOk: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>',
+    checkCircle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>',
+    calX: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9.31 17l2.44-2.44L14.19 17l1.06-1.06-2.44-2.44 2.44-2.44L14.19 10l-2.44 2.44L9.31 10l-1.06 1.06 2.44 2.44-2.44 2.44L9.31 17zM19 3h-1V1h-2v2H8V1H6v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5V8h14v11z"/></svg>',
+    calOk: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 3h-1V1h-2v2H8V1H6v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5V8h14v11zM10.5 17.4l-2.9-2.9 1.06-1.06 1.84 1.84 4.04-4.04 1.06 1.06-5.1 5.1z"/></svg>',
+    logout: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8v-2H4V5z"/></svg>',
+    chev: '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 6l6 6-6 6"/></svg>'
   };
 
-  var TITULOS = { agendar: 'Início', novo: 'Início', meus: 'Agendamentos', planos: 'Planos', servicos: 'Serviços', profissionais: 'Profissionais' };
+  var TITULOS = { agendar: 'Início', novo: 'Início', meus: 'Agendamentos', planos: 'Planos', servicos: 'Serviços', profissionais: 'Profissionais', graficos: 'Gráficos', perfil: 'Perfil', seguranca: 'Perfil', integracoes: 'Perfil' };
 
   function itensMenu() {
     var t = state.user.tipo;
-    if (t === 'admin') return [
+    var itens;
+    if (t === 'admin') itens = [
       ['meus', 'Agendamentos', ICO.cal],
       ['servicos', 'Serviços', ICO.tag],
       ['profissionais', 'Profissionais', ICO.users],
+      ['graficos', 'Gráficos', ICO.chart],
       ['admin', 'Painel completo', ICO.gear],
     ];
-    if (t === 'profissional') return [['meus', 'Agendamentos', ICO.cal]];
-    return [['agendar', 'Início', ICO.home], ['meus', 'Agendamentos', ICO.cal], ['planos', 'Planos', ICO.layers]];
+    else if (t === 'profissional') itens = [['meus', 'Agendamentos', ICO.cal]];
+    else itens = [['agendar', 'Início', ICO.home], ['meus', 'Agendamentos', ICO.cal], ['planos', 'Planos', ICO.layers]];
+    itens.push(['perfil', 'Perfil', ICO.user]);
+    return itens;
+  }
+
+  var SUBTELAS_PERFIL = ['seguranca', 'integracoes'];
+
+  function avatarHTML(u, classe) {
+    return '<span class="avatar ' + (classe || '') + '">' +
+      (u.foto ? '<img src="' + esc(u.foto) + '" alt="">' : esc(iniciais(u.nome))) + '</span>';
   }
 
   function renderNav() {
@@ -234,12 +389,14 @@
     if (!el) { el = document.createElement('div'); el.id = 'drawer'; document.body.appendChild(el); }
     var h = itensMenu().map(function (it) {
       if (it[0] === 'admin') return '<a class="menu-item" href="/admin/">' + it[2] + '<span>' + it[1] + '</span></a>';
-      var ativo = state.view === it[0] || (it[0] === 'agendar' && state.view === 'novo');
+      var ativo = state.view === it[0] || (it[0] === 'agendar' && state.view === 'novo') ||
+        (it[0] === 'perfil' && SUBTELAS_PERFIL.indexOf(state.view) !== -1);
       return '<button class="menu-item ' + (ativo ? 'active' : '') + '" data-go="' + it[0] + '">' + it[2] + '<span>' + it[1] + '</span></button>';
     }).join('');
     h += '<button class="menu-item" data-action="sair">' + ICO.exit + '<span>Sair</span></button>';
     el.innerHTML = '<button class="drawer-back" data-action="fechar-menu" aria-label="Fechar menu"></button>' +
-      '<aside class="drawer-panel"><div class="drawer-user"><strong>' + esc(state.user.nome) + '</strong><small>' + esc(state.user.email) + '</small></div>' + h + '</aside>';
+      '<aside class="drawer-panel"><div class="drawer-user">' + avatarHTML(state.user, 'sm') +
+      '<div><strong>' + esc(state.user.nome) + '</strong><small>' + esc(state.user.email) + '</small></div></div>' + h + '</aside>';
     document.body.classList.add('noscroll');
   }
 
@@ -346,18 +503,27 @@
       app.innerHTML = cabecalhoAdmin('Profissionais', 'novo-prof', '+ Novo profissional') +
         (state.admProfs.length ? '<div class="list">' + state.admProfs.map(function (p) {
           return '<article class="appt"><div><div class="what">' + esc(p.nome) + '</div>' +
-            '<div class="who">' + p.servicos.length + ' serviço(s) · horários de ' + esc(p.intervalo_minutos) + ' em ' + esc(p.intervalo_minutos) + ' min</div></div>' +
+            '<div class="who">' + p.servicos.length + ' serviço(s) · ' + resumoDias(p.horarios || []) + '</div></div>' +
             '<div class="appt-side"><span class="badge ' + (p.ativo ? 'confirmado' : 'cancelado') + '">' + (p.ativo ? 'Ativo' : 'Inativo') + '</span>' +
             '<button class="btn ghost small" data-action="editar-prof" data-id="' + p.id + '">Editar</button></div></article>';
         }).join('') + '</div>' : '<div class="empty">Nenhum profissional cadastrado.</div>') +
-        '<p class="hint">Dias e horários de trabalho, e novos usuários, ficam no <a class="link" href="/admin/">painel completo</a>.</p>';
+        '<p class="hint">Folgas e bloqueios pontuais ficam no <a class="link" href="/admin/">painel completo</a>.</p>';
     }, erroAdmin);
   }
 
+  function resumoDias(horarios) {
+    var dias = [];
+    horarios.forEach(function (h) { if (dias.indexOf(h.dia_semana) === -1) dias.push(h.dia_semana); });
+    if (!dias.length) return '<span class="aviso-sem-horario">sem dias de trabalho (não aparece para agendar)</span>';
+    return dias.sort().map(function (d) { return NOMES_DIAS[d].slice(0, 3); }).join(', ');
+  }
+
   function formProf(p, usuarios) {
-    var sel = usuarios ? '<div class="field"><label>Usuário</label><select name="usuario">' + usuarios.map(function (u) {
-      return '<option value="' + u.id + '">' + esc(u.nome) + ' (' + esc(u.email) + ')</option>';
-    }).join('') + '</select></div>' : '';
+    var sel = usuarios ? '<div class="field"><label>Usuário que será promovido a profissional</label>' +
+      '<input type="search" id="busca-usuario" placeholder="Buscar por nome ou e-mail" autocomplete="off">' +
+      '<select name="usuario" size="6" required>' + usuarios.map(function (u, i) {
+        return '<option value="' + u.id + '"' + (i === 0 ? ' selected' : '') + '>' + esc(u.nome) + ' (' + esc(u.email) + ')</option>';
+      }).join('') + '</select></div>' : '';
     var checks = (state.admServicos || []).map(function (x) {
       return '<label class="check-row"><input type="checkbox" name="servicos" value="' + x.id + '"' +
         (p && p.servicos.indexOf(x.id) !== -1 ? ' checked' : '') + '> ' + esc(x.nome) + '</label>';
@@ -365,8 +531,88 @@
     return '<form id="form-prof" data-id="' + (p ? p.id : '') + '" novalidate><div id="form-erro"></div>' + sel +
       '<div class="field"><label>Serviços que realiza</label><div class="checks">' + (checks || '<p class="hint">Cadastre serviços primeiro.</p>') + '</div></div>' +
       campo('intervalo_minutos', 'Intervalo entre horários (minutos)', p ? p.intervalo_minutos : 15, 'number', 'min="5" max="120"') +
+      '<div class="field"><label for="f-comissao">Comissão</label><div class="campo-prefixo"><span>%</span>' +
+        '<input id="f-comissao" name="comissao_percentual" type="number" min="0" max="100" step="0.01" inputmode="decimal" value="' +
+        esc(p ? Number(p.comissao_percentual) : 0) + '"></div>' +
+        '<small class="hint">Porcentagem do valor dos serviços que fica com o profissional.</small></div>' +
+      diasTrabalho(p ? p.horarios || [] : []) +
       '<div class="field"><label class="check-row"><input type="checkbox" name="ativo"' + (!p || p.ativo ? ' checked' : '') + '> Ativo</label></div>' +
-      '<button class="btn block" type="submit">Salvar</button></form>';
+      '<button class="btn block" type="submit">Salvar</button>' +
+      (p ? '<button class="btn danger block" type="button" data-action="remover-prof" data-id="' + p.id + '" style="margin-top:10px">Remover profissional</button>' : '') +
+      '</form>';
+  }
+
+  /* Dias de trabalho: um bloco por dia (0 = segunda ... 6 = domingo), cada um com uma ou mais janelas */
+  var NOMES_DIAS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
+
+  function janelaHTML(ini, fim) {
+    return '<div class="janela"><input type="time" data-ini value="' + esc(ini || '09:00') + '" aria-label="Início">' +
+      '<span>às</span><input type="time" data-fim value="' + esc(fim || '18:00') + '" aria-label="Fim">' +
+      '<button type="button" class="janela-rm" data-action="rm-janela" aria-label="Remover horário">×</button></div>';
+  }
+
+  function diasTrabalho(horarios) {
+    return '<div class="field"><label>Dias e horários de trabalho</label><div class="checks dias-trab">' +
+      NOMES_DIAS.map(function (nome, dia) {
+        var hs = horarios.filter(function (h) { return h.dia_semana === dia; });
+        return '<div class="dia-trab' + (hs.length ? '' : ' off') + '" data-dia="' + dia + '">' +
+          '<label class="check-row"><input type="checkbox" data-dia-ativo' + (hs.length ? ' checked' : '') + '> ' + nome + '</label>' +
+          '<div class="janelas">' + hs.map(function (h) { return janelaHTML(h.hora_inicio, h.hora_fim); }).join('') + '</div>' +
+          '<button type="button" class="link janela-add" data-action="add-janela">+ outro horário</button></div>';
+      }).join('') + '</div></div>';
+  }
+
+  function marcarDiaTrab(input) {
+    var bloco = input.closest('.dia-trab');
+    bloco.classList.toggle('off', !input.checked);
+    var janelas = bloco.querySelector('.janelas');
+    if (input.checked && !janelas.children.length) janelas.insertAdjacentHTML('beforeend', janelaHTML());
+  }
+
+  function addJanela(btn) {
+    var janelas = btn.closest('.dia-trab').querySelector('.janelas');
+    var ultima = janelas.lastElementChild;
+    // Sugere começar onde o horário anterior terminou (ex.: 13:00 depois do almoço)
+    janelas.insertAdjacentHTML('beforeend', ultima ? janelaHTML(ultima.querySelector('[data-fim]').value, '18:00') : janelaHTML());
+  }
+
+  function rmJanela(btn) {
+    var bloco = btn.closest('.dia-trab');
+    btn.closest('.janela').remove();
+    if (!bloco.querySelector('.janela')) {
+      bloco.classList.add('off');
+      bloco.querySelector('[data-dia-ativo]').checked = false;
+    }
+  }
+
+  function lerHorarios(form) {
+    var horarios = [], erro = null;
+    [].forEach.call(form.querySelectorAll('.dia-trab'), function (bloco) {
+      if (!bloco.querySelector('[data-dia-ativo]').checked) return;
+      var dia = Number(bloco.dataset.dia);
+      [].forEach.call(bloco.querySelectorAll('.janela'), function (j) {
+        var ini = j.querySelector('[data-ini]').value, fim = j.querySelector('[data-fim]').value;
+        if (!ini || !fim) erro = erro || NOMES_DIAS[dia] + ': preencha início e fim.';
+        else if (fim <= ini) erro = erro || NOMES_DIAS[dia] + ': o fim deve ser depois do início.';
+        horarios.push({ dia_semana: dia, hora_inicio: ini, hora_fim: fim });
+      });
+    });
+    return { horarios: horarios, erro: erro };
+  }
+
+  function removerProf(id, btn) {
+    var p = state.admProfs.filter(function (x) { return x.id === id; })[0];
+    if (!window.confirm('Remover ' + p.nome + ' dos profissionais? A conta continuará existindo como cliente.')) return;
+    btn.disabled = true;
+    api('/api/catalogo/profissionais/' + id + '/', { method: 'DELETE' }).then(function () {
+      state.profissionais = [];
+      fecharSheet();
+      toast('Profissional removido.');
+      renderProfissionais();
+    }, function (e) {
+      document.getElementById('form-erro').innerHTML = '<div class="alert">' + esc(e.message) + '</div>';
+      btn.disabled = false;
+    });
   }
 
   function abrirProf(id) {
@@ -375,8 +621,14 @@
       return folha('Editar ' + p.nome, formProf(p, null));
     }
     api('/api/catalogo/profissionais/usuarios-disponiveis/').then(function (us) {
-      if (!us.length) { toast('Não há usuários do tipo Profissional sem cadastro. Crie um no painel completo.'); return; }
+      if (!us.length) { toast('Não há usuários disponíveis para promover a profissional.'); return; }
       folha('Novo profissional', formProf(null, us));
+      var busca = document.getElementById('busca-usuario');
+      busca.addEventListener('input', function () {
+        var termo = busca.value.trim().toLowerCase();
+        var opts = busca.form.elements.usuario.options;
+        for (var i = 0; i < opts.length; i++) opts[i].hidden = termo && opts[i].text.toLowerCase().indexOf(termo) === -1;
+      });
     }, function (e) { toast(e.message); });
   }
 
@@ -386,10 +638,267 @@
     var corpo = {
       servicos: d.getAll('servicos').map(Number),
       intervalo_minutos: Number(d.get('intervalo_minutos')),
+      comissao_percentual: String(d.get('comissao_percentual') || '0').replace(',', '.'),
       ativo: form.elements.ativo.checked,
     };
-    if (!id) corpo.usuario = Number(d.get('usuario'));
+    var h = lerHorarios(form);
+    if (h.erro) { document.getElementById('form-erro').innerHTML = '<div class="alert">' + esc(h.erro) + '</div>'; return; }
+    corpo.horarios = h.horarios;
+    if (!id) {
+      if (!d.get('usuario')) { document.getElementById('form-erro').innerHTML = '<div class="alert">Selecione um usuário.</div>'; return; }
+      corpo.usuario = Number(d.get('usuario'));
+    }
     enviarForm(form, '/api/catalogo/profissionais/' + (id ? id + '/' : ''), id ? 'PATCH' : 'POST', corpo, renderProfissionais);
+  }
+
+  /* ---------- Admin: gráficos ---------- */
+  var DIAS_SEMANA = [[1, 'Seg'], [2, 'Ter'], [3, 'Qua'], [4, 'Qui'], [5, 'Sex'], [6, 'Sáb'], [7, 'Dom']];
+  // Cores categóricas em ordem fixa (seguras para daltonismo); a partir da 8ª série vira "Outros"
+  var CORES_SERIE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
+  var COR_OUTROS = '#a3a29d';
+
+  function renderGraficos() {
+    var g = state.graf || (state.graf = { aba: 'profissionais', dias: [1, 2, 3, 4, 5, 6, 7], profs: null, aberto: null });
+    app.innerHTML = '<div class="page-head row-head"><h1 style="font-size:clamp(34px,6vw,52px)">Gráficos</h1>' +
+      '<div class="segmented" role="tablist"><button class="seg ' + (g.aba === 'profissionais' ? 'active' : '') +
+      '" role="tab" aria-selected="true" data-graf-aba="profissionais">Profissionais</button></div></div>' +
+      '<div id="graf-area"><div class="loading">Carregando…</div></div><div id="graf-tip" class="graf-tip" hidden></div>';
+    api('/api/agenda/graficos/profissionais/' + (g.mes ? '?mes=' + g.mes : '')).then(function (d) {
+      g.mes = d.mes;
+      g.dados = d;
+      if (!g.profs) g.profs = d.profissionais.map(function (p) { return p.id; });
+      // A cor segue o serviço (mais agendados primeiro), não a posição da fatia após o filtro
+      var qtd = {};
+      d.linhas.forEach(function (l) { qtd[l.servico] = (qtd[l.servico] || 0) + l.qtd; });
+      var ordem = d.servicos.slice().sort(function (a, b) { return (qtd[b.id] || 0) - (qtd[a.id] || 0) || a.nome.localeCompare(b.nome); });
+      var vagas = ordem.length > CORES_SERIE.length ? CORES_SERIE.length - 1 : ordem.length;
+      g.corServ = {};
+      ordem.forEach(function (s, i) { g.corServ[s.id] = i < vagas ? CORES_SERIE[i] : null; });
+      desenharGraficos();
+    }, function (e) {
+      document.getElementById('graf-area').innerHTML = '<div class="alert">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function filtroGraf(chave, rotulo, opcoes, marcados) {
+    var aberto = state.graf.aberto === chave;
+    var resumo = marcados.length === opcoes.length ? 'Todos' : marcados.length ? marcados.length + ' selecionado(s)' : 'Nenhum';
+    return '<div class="graf-filtro">' +
+      '<button type="button" class="graf-filtro-btn' + (aberto ? ' aberto' : '') + '" data-graf-abrir="' + chave + '" aria-expanded="' + aberto + '">' +
+        '<span><strong>' + rotulo + '</strong><small>' + resumo + '</small></span>' + ICO.chev + '</button>' +
+      (aberto ? '<div class="graf-opcoes" data-graf-filtro="' + chave + '">' +
+        '<label class="check-row"><input type="checkbox" data-todos' + (marcados.length === opcoes.length ? ' checked' : '') + '> Todos</label>' +
+        opcoes.map(function (o) {
+          return '<label class="check-row"><input type="checkbox" value="' + o[0] + '"' +
+            (marcados.indexOf(o[0]) !== -1 ? ' checked' : '') + '> ' + esc(o[1]) + '</label>';
+        }).join('') + '</div>' : '') +
+      '</div>';
+  }
+
+  function desenharGraficos() {
+    var g = state.graf, d = g && g.dados;
+    var area = document.getElementById('graf-area');
+    if (!area || !d) return;
+    var linhas = d.linhas.filter(function (l) { return g.dias.indexOf(l.dia) !== -1 && g.profs.indexOf(l.profissional) !== -1; });
+    var dias = DIAS_SEMANA.filter(function (x) { return g.dias.indexOf(x[0]) !== -1; });
+
+    // Séries por serviço: a cor segue o serviço; quem ficou sem cor entra em "Outros"
+    var chave = function (id) { return g.corServ[id] ? String(id) : 'outros'; };
+    var porServ = {}, totalQtd = 0;
+    linhas.forEach(function (l) {
+      totalQtd += l.qtd;
+      porServ[chave(l.servico)] = (porServ[chave(l.servico)] || 0) + l.qtd;
+    });
+    var series = d.servicos.filter(function (s) { return g.corServ[s.id] && porServ[s.id]; }).map(function (s) {
+      return { chave: String(s.id), nome: s.nome, cor: g.corServ[s.id] };
+    }).sort(function (a, b) { return CORES_SERIE.indexOf(a.cor) - CORES_SERIE.indexOf(b.cor); });
+    if (porServ.outros) series.push({ chave: 'outros', nome: 'Outros', cor: COR_OUTROS });
+
+    // Pizza: quantidade de agendamentos por serviço
+    var fatias = series.map(function (s) { return { nome: s.nome, valor: porServ[s.chave], cor: s.cor }; });
+
+    // Colunas: renda e ticket médio por dia da semana, separados por serviço
+    var cols = dias.map(function (x) {
+      var soma = 0, n = 0, partes = {};
+      linhas.forEach(function (l) {
+        if (l.dia !== x[0]) return;
+        soma += l.total;
+        n += l.qtd;
+        var p = partes[chave(l.servico)] || (partes[chave(l.servico)] = { renda: 0, qtd: 0 });
+        p.renda += l.total;
+        p.qtd += l.qtd;
+      });
+      return { rotulo: x[1], renda: soma, qtd: n, ticket: n ? soma / n : 0, partes: partes };
+    });
+
+    area.innerHTML = '<div class="graf-layout"><div class="graf-col">' + cartaoComissoes() +
+      '<section class="card graf-card"><h3>Serviços por dia</h3><p class="graf-sub">Agendamentos por serviço nos dias selecionados · ' + totalQtd + ' no total</p>' +
+        graficoPizza(fatias, totalQtd) + '</section>' +
+      '<section class="card graf-card"><h3>Ticket médio</h3><p class="graf-sub">Valor médio por agendamento, por dia da semana. Cada cor mostra quanto o serviço contribui para a média.</p>' +
+        graficoColunas(cols, 'ticket', series) + '</section>' +
+      '<section class="card graf-card"><h3>Renda por dia</h3><p class="graf-sub">Soma dos valores, por dia da semana, separada por serviço</p>' +
+        graficoColunas(cols, 'renda', series) + '</section>' +
+      '</div><aside class="graf-filtros">' +
+        filtroGraf('dias', 'Dias', DIAS_SEMANA, g.dias) +
+        filtroGraf('profs', 'Profissionais', d.profissionais.map(function (p) { return [p.id, p.nome]; }), g.profs) +
+        '<p class="hint">Cancelados e faltas não entram nos gráficos.</p>' +
+      '</aside></div>';
+  }
+
+  // Total a receber: comissão do mês dos profissionais selecionados no filtro
+  function cartaoComissoes() {
+    var g = state.graf, d = g.dados;
+    var nomes = {};
+    d.profissionais.forEach(function (p) { nomes[p.id] = p.nome; });
+    var itens = d.comissoes.filter(function (c) { return g.profs.indexOf(c.profissional) !== -1; });
+    var total = 0, previsto = 0;
+    itens.forEach(function (c) { total += c.a_receber; previsto += c.previsto; });
+    var p = d.mes.split('-');
+    var nomeMes = new Date(+p[0], +p[1] - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    var linhas = itens.map(function (c) {
+      return '<tr><th scope="row">' + esc(nomes[c.profissional]) + '</th>' +
+        '<td>' + c.percentual.toLocaleString('pt-BR') + '%</td>' +
+        '<td>' + brl(c.renda_concluida) + '<small>' + c.qtd_concluidos + ' concluído(s)</small></td>' +
+        '<td class="com-valor">' + brl(c.a_receber) + (c.previsto ? '<small>+ ' + brl(c.previsto) + ' previsto</small>' : '') + '</td></tr>';
+    }).join('');
+    return '<section class="card graf-card com-card">' +
+      '<div class="com-topo"><h3>Total a receber</h3><div class="com-mes">' +
+        '<button class="ag-seta" data-action="graf-mes" data-passo="-1" aria-label="Mês anterior">‹</button>' +
+        '<strong>' + esc(nomeMes) + '</strong>' +
+        '<button class="ag-seta" data-action="graf-mes" data-passo="1" aria-label="Próximo mês">›</button></div></div>' +
+      '<div class="com-total">' + brl(total) + '</div>' +
+      '<p class="graf-sub">Comissão sobre os atendimentos concluídos no mês' +
+        (previsto ? ' · mais ' + brl(previsto) + ' previsto em agendamentos ainda não finalizados' : '') + '.</p>' +
+      (linhas ? '<div class="graf-scroll"><table class="com-tabela"><thead><tr><th>Profissional</th><th>Comissão</th><th>Atendimentos</th><th>A receber</th></tr></thead>' +
+        '<tbody>' + linhas + '</tbody></table></div>' : '<div class="empty">Nenhum profissional selecionado.</div>') +
+      '</section>';
+  }
+
+  function mudarMesGraf(passo) {
+    var p = state.graf.mes.split('-');
+    var d = new Date(+p[0], +p[1] - 1 + passo, 1);
+    state.graf.mes = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    state.graf.aberto = null;
+    renderGraficos();
+  }
+
+  function graficoPizza(fatias, total) {
+    if (!total) return '<div class="empty">Nenhum agendamento para os filtros escolhidos.</div>';
+    var R = 100, C = 110, ang = -Math.PI / 2;
+    var svg = fatias.map(function (f) {
+      var pct = f.valor / total;
+      var tip = esc(f.nome + '|' + f.valor + ' agendamento(s) · ' + Math.round(pct * 100) + '%');
+      if (pct >= 0.9999) return '<circle cx="' + C + '" cy="' + C + '" r="' + R + '" fill="' + f.cor + '" data-tip="' + tip + '"/>';
+      var a2 = ang + pct * 2 * Math.PI;
+      var p = 'M' + C + ' ' + C + 'L' + (C + R * Math.cos(ang)).toFixed(2) + ' ' + (C + R * Math.sin(ang)).toFixed(2) +
+        'A' + R + ' ' + R + ' 0 ' + (pct > 0.5 ? 1 : 0) + ' 1 ' + (C + R * Math.cos(a2)).toFixed(2) + ' ' + (C + R * Math.sin(a2)).toFixed(2) + 'Z';
+      ang = a2;
+      return '<path d="' + p + '" fill="' + f.cor + '" data-tip="' + tip + '"/>';
+    }).join('');
+    var legenda = fatias.map(function (f) {
+      return '<li><span class="graf-chip" style="background:' + f.cor + '"></span><span class="graf-leg-nome">' + esc(f.nome) +
+        '</span><span class="graf-leg-val">' + f.valor + ' · ' + Math.round(f.valor / total * 100) + '%</span></li>';
+    }).join('');
+    return '<div class="graf-pizza"><svg viewBox="0 0 220 220" role="img" aria-label="Gráfico de pizza: agendamentos por serviço">' +
+      '<g class="graf-fatias">' + svg + '</g></svg><ul class="graf-legenda">' + legenda + '</ul></div>';
+  }
+
+  function tetoBonito(v) {
+    if (v <= 0) return 1;
+    var e = Math.pow(10, Math.floor(Math.log10(v))), m = v / e;
+    return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * e;
+  }
+
+  function brlCurto(v) {
+    if (v >= 1000) return 'R$ ' + (v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' mil';
+    return 'R$ ' + Math.round(v).toLocaleString('pt-BR');
+  }
+
+  // Valor do segmento de um serviço: na renda é a soma; no ticket é a contribuição
+  // do serviço para a média do dia (renda do serviço / agendamentos do dia), então
+  // os segmentos somam exatamente o ticket médio.
+  function valorParte(c, p, campo) {
+    return campo === 'renda' ? p.renda : (c.qtd ? p.renda / c.qtd : 0);
+  }
+
+  function graficoColunas(cols, campo, series) {
+    if (!cols.length) return '<div class="empty">Selecione ao menos um dia.</div>';
+    var W = 560, H = 240, L = 64, T = 22, B = 30, Rm = 8, GAP = 2;
+    var valores = cols.map(function (c) { return c[campo]; });
+    var max = Math.max.apply(null, valores);
+    var teto = tetoBonito(max), alt = H - T - B, banda = (W - L - Rm) / cols.length;
+    var larg = Math.min(44, banda * 0.6), base = T + alt;
+    var grade = [0, 0.25, 0.5, 0.75, 1].map(function (f) {
+      var yy = (base - f * alt).toFixed(1);
+      return '<line x1="' + L + '" x2="' + (W - Rm) + '" y1="' + yy + '" y2="' + yy + '" class="' + (f ? 'graf-grade' : 'graf-base') + '"/>' +
+        '<text x="' + (L - 8) + '" y="' + yy + '" class="graf-eixo" text-anchor="end" dominant-baseline="middle">' + brlCurto(teto * f) + '</text>';
+    }).join('');
+    var iMax = max > 0 ? valores.indexOf(max) : -1;
+    var barras = cols.map(function (c, i) {
+      var cx = L + banda * i + banda / 2, x = cx - larg / 2, v = c[campo];
+      var segs = series.filter(function (s) { return c.partes[s.chave] && valorParte(c, c.partes[s.chave], campo) > 0; });
+      var y = base;
+      var blocos = segs.map(function (s, j) {
+        var p = c.partes[s.chave], val = valorParte(c, p, campo);
+        var h = Math.max(1, alt * val / teto), topo = y - h;
+        // 2px de respiro entre segmentos; cantos de 4px só no topo da coluna
+        var baixo = j ? y - Math.min(GAP, h / 2) : y;
+        var forma;
+        if (j === segs.length - 1) {
+          var r = Math.min(4, baixo - topo, larg / 2);
+          forma = '<path d="M' + x.toFixed(1) + ' ' + baixo.toFixed(1) + 'V' + (topo + r).toFixed(1) +
+            'Q' + x.toFixed(1) + ' ' + topo.toFixed(1) + ' ' + (x + r).toFixed(1) + ' ' + topo.toFixed(1) +
+            'H' + (x + larg - r).toFixed(1) + 'Q' + (x + larg).toFixed(1) + ' ' + topo.toFixed(1) + ' ' + (x + larg).toFixed(1) + ' ' + (topo + r).toFixed(1) +
+            'V' + baixo.toFixed(1) + 'Z" fill="' + s.cor + '"/>';
+        } else {
+          forma = '<rect x="' + x.toFixed(1) + '" y="' + topo.toFixed(1) + '" width="' + larg.toFixed(1) +
+            '" height="' + Math.max(0, baixo - topo).toFixed(1) + '" fill="' + s.cor + '"/>';
+        }
+        y = topo;
+        var tip = campo === 'renda'
+          ? s.nome + ' · ' + c.rotulo + '|' + brl(val) + ' de ' + brl(v) + '|' + p.qtd + ' agendamento(s)'
+          : s.nome + ' · ' + c.rotulo + '|Contribui ' + brl(val) + ' do ticket de ' + brl(v) +
+            '|Média do serviço: ' + brl(p.renda / p.qtd) + ' (' + p.qtd + ' agend.)';
+        return '<g class="graf-seg" data-tip="' + esc(tip) + '">' + forma + '</g>';
+      }).join('');
+      var rotulo = i === iMax ? '<text x="' + cx.toFixed(1) + '" y="' + (y - 7).toFixed(1) + '" class="graf-valor" text-anchor="middle">' + brlCurto(v) + '</text>' : '';
+      var resumo = c.rotulo + '|' + (campo === 'renda' ? 'Total: ' : 'Ticket médio: ') + brl(v) + '|' +
+        (c.qtd ? c.qtd + ' agendamento(s)' : 'Sem agendamentos');
+      // Área de hover é a faixa inteira do dia, maior que a coluna; cada segmento tem o seu próprio detalhe
+      return '<g class="graf-coluna" data-tip="' + esc(resumo) + '">' +
+        '<rect x="' + (L + banda * i).toFixed(1) + '" y="' + T + '" width="' + banda.toFixed(1) + '" height="' + alt + '" class="graf-alvo"/>' +
+        blocos + rotulo +
+        '<text x="' + cx.toFixed(1) + '" y="' + (H - 8) + '" class="graf-eixo" text-anchor="middle">' + c.rotulo + '</text></g>';
+    }).join('');
+    var legenda = series.length ? '<ul class="graf-legenda-linha">' + series.map(function (s) {
+      return '<li><span class="graf-chip" style="background:' + s.cor + '"></span>' + esc(s.nome) + '</li>';
+    }).join('') + '</ul>' : '';
+    return '<div class="graf-scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" class="graf-svg" role="img">' + grade + barras + '</svg></div>' + legenda;
+  }
+
+  function mudarFiltroGraf(input) {
+    var g = state.graf;
+    var caixa = input.closest('[data-graf-filtro]');
+    var chave = caixa.dataset.grafFiltro;
+    var todos = chave === 'dias' ? DIAS_SEMANA.map(function (x) { return x[0]; }) : g.dados.profissionais.map(function (p) { return p.id; });
+    if (input.hasAttribute('data-todos')) g[chave] = input.checked ? todos : [];
+    else g[chave] = [].map.call(caixa.querySelectorAll('input[value]:checked'), function (i) { return Number(i.value); });
+    desenharGraficos();
+  }
+
+  function mostrarTip(ev) {
+    var tip = document.getElementById('graf-tip');
+    if (!tip) return;
+    var alvo = ev.target.closest && ev.target.closest('[data-tip]');
+    if (!alvo) { tip.hidden = true; return; }
+    var partes = alvo.getAttribute('data-tip').split('|');
+    tip.innerHTML = '<strong>' + esc(partes[0]) + '</strong>' +
+      partes.slice(1).map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('');
+    tip.hidden = false;
+    var x = ev.clientX + 14, w = tip.offsetWidth;
+    if (x + w > window.innerWidth - 8) x = ev.clientX - w - 14;
+    tip.style.left = x + 'px';
+    tip.style.top = (ev.clientY + 14) + 'px';
   }
 
   function render() {
@@ -400,9 +909,13 @@
 
     if (!state.user) return renderHome();
     var tipo = state.user.tipo;
+    if (state.view === 'perfil') return renderPerfil();
+    if (state.view === 'seguranca') return renderSeguranca();
+    if (state.view === 'integracoes') return renderIntegracoes();
     if (state.view === 'planos') return renderPlanos();
     if (tipo === 'admin' && state.view === 'servicos') return renderServicos();
     if (tipo === 'admin' && state.view === 'profissionais') return renderProfissionais();
+    if (tipo === 'admin' && state.view === 'graficos') return renderGraficos();
     if (state.view === 'meus') return renderMeus();
     if (tipo !== 'cliente') { state.view = 'meus'; return renderMeus(); }
     if (state.confirmado) return renderSucesso();
@@ -411,7 +924,35 @@
   }
 
   /* ---------- Home / login ---------- */
+  function campoAuth(nome, rotulo, extra) {
+    return '<div class="field"><label for="f-' + nome + '">' + rotulo + '</label>' +
+      '<input id="f-' + nome + '" name="' + nome + '" type="text" ' + (extra || '') + '></div>';
+  }
+
+  // Segunda etapa do login, para contas com autenticação em dois fatores.
+  function renderCodigo2fa() {
+    app.innerHTML =
+      '<section class="hero">' +
+        '<p class="eyebrow">Salão</p>' +
+        '<h1>Só mais<br>um passo.</h1>' +
+        '<p class="lead">Confirme que é você para entrar.</p>' +
+        '<div class="auth-card">' +
+          '<div id="auth-erro"></div>' +
+          '<form id="form-2fa-login" novalidate>' +
+            '<p class="form-nota">Digite o código de 6 dígitos do seu aplicativo autenticador.</p>' +
+            '<div class="field"><label for="f-codigo">Código</label>' +
+              '<input id="f-codigo" name="codigo" class="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" data-mask="cod" required></div>' +
+            '<button class="btn block" type="submit">Verificar</button>' +
+            '<button class="btn ghost block" type="button" data-action="voltar-login" style="margin-top:10px">Voltar</button>' +
+          '</form>' +
+        '</div>' +
+      '</section>';
+    var c = document.getElementById('f-codigo');
+    if (c) c.focus();
+  }
+
   function renderHome() {
+    if (state.authTab === '2fa') return renderCodigo2fa();
     var login = state.authTab === 'login';
     app.innerHTML =
       '<section class="hero">' +
@@ -427,9 +968,20 @@
           '<form id="auth-form" novalidate>' +
             (login ? '' :
               '<div class="field"><label for="f-nome">Nome</label><input id="f-nome" name="nome" autocomplete="name" required></div>' +
-              '<div class="field"><label for="f-tel">Telefone</label><input id="f-tel" name="telefone" type="tel" autocomplete="tel" placeholder="(11) 90000-0000"></div>') +
+              campoAuth('cpf', 'CPF', 'inputmode="numeric" autocomplete="off" placeholder="000.000.000-00" maxlength="14" data-mask="cpf" required') +
+              '<div class="field"><label for="f-tel">Telefone</label><input id="f-tel" name="telefone" type="tel" autocomplete="tel" placeholder="(11) 90000-0000" maxlength="15" data-mask="tel"></div>') +
             '<div class="field"><label for="f-email">E-mail</label><input id="f-email" name="email" type="email" autocomplete="email" required></div>' +
             '<div class="field"><label for="f-senha">Senha</label><input id="f-senha" name="password" type="password" autocomplete="' + (login ? 'current-password' : 'new-password') + '" required></div>' +
+            (login ? '' :
+              '<p class="form-sep">Endereço <span>opcional, você pode completar depois no perfil</span></p>' +
+              campoAuth('cep', 'CEP', 'inputmode="numeric" autocomplete="postal-code" placeholder="00000-000" maxlength="9" data-mask="cep"') +
+              campoAuth('rua', 'Rua', 'autocomplete="address-line1"') +
+              '<div class="field-row">' +
+                campoAuth('numero', 'Número', 'autocomplete="off"') +
+                campoAuth('complemento', 'Complemento', 'autocomplete="address-line2" placeholder="Apto, bloco…"') +
+              '</div>' +
+              campoAuth('bairro', 'Bairro', 'autocomplete="address-level3"') +
+              campoAuth('cidade', 'Cidade', 'autocomplete="address-level2"')) +
             '<button class="btn block" type="submit">' + (login ? 'Entrar' : 'Criar conta') + '</button>' +
           '</form>' +
         '</div>' +
@@ -443,9 +995,22 @@
     var btn = form.querySelector('button[type=submit]');
     erro.innerHTML = '';
 
-    if (!d.email || !d.password || (state.authTab === 'registro' && !d.nome)) {
+    var registro = state.authTab === 'registro';
+    if (!d.email || !d.password || (registro && (!d.nome || !d.cpf))) {
       erro.innerHTML = '<div class="alert">Preencha todos os campos obrigatórios.</div>';
       return;
+    }
+    if (registro) {
+      if (!cpfValido(d.cpf)) {
+        erro.innerHTML = '<div class="alert">CPF inválido. Confira os números.</div>';
+        return;
+      }
+      if (d.cep && soDigitos(d.cep).length !== 8) {
+        erro.innerHTML = '<div class="alert">CEP inválido. Ele deve ter 8 números.</div>';
+        return;
+      }
+      d.cpf = soDigitos(d.cpf);
+      d.cep = soDigitos(d.cep);
     }
 
     btn.disabled = true;
@@ -459,6 +1024,447 @@
     }
     fluxo.catch(function (e) {
       erro.innerHTML = '<div class="alert">' + esc(e.message) + '</div>';
+      btn.disabled = false;
+    });
+  }
+
+  /* ============================================================
+     PERFIL
+  ============================================================ */
+  function pf(nome, rotulo, valor, extra, somenteLeitura) {
+    return '<label class="pf' + (somenteLeitura ? ' ro' : '') + '"><span>' + rotulo + '</span>' +
+      '<input name="' + nome + '" type="text" value="' + esc(valor) + '" ' + (somenteLeitura ? 'readonly ' : '') + (extra || '') + '></label>';
+  }
+
+  function fotoHTML() {
+    var src = state.fotoPreview || state.user.foto;
+    return src ? '<img src="' + esc(src) + '" alt="Foto de perfil">' : esc(iniciais(state.user.nome));
+  }
+
+  /* ---------- Notificações (preferência deste dispositivo) ---------- */
+  function notifSuportada() { return typeof Notification !== 'undefined'; }
+  function notifAtiva() { return notifSuportada() && Notification.permission === 'granted' && load('notif') === '1'; }
+
+  function notifTexto() {
+    if (!notifSuportada()) return 'Não disponíveis neste navegador';
+    if (Notification.permission === 'denied') return 'Bloqueadas nas configurações do navegador';
+    return notifAtiva() ? 'Ativadas neste dispositivo' : 'Desativadas neste dispositivo';
+  }
+
+  function atualizarNotif() {
+    var b = document.getElementById('btn-notif');
+    var t = document.getElementById('notif-txt');
+    if (b) b.setAttribute('aria-checked', notifAtiva() ? 'true' : 'false');
+    if (t) t.textContent = notifTexto();
+  }
+
+  function alternarNotif() {
+    if (!notifSuportada()) { toast('Este navegador não suporta notificações.'); return; }
+    if (notifAtiva()) {
+      save('notif', null);
+      atualizarNotif();
+      toast('Notificações desativadas neste dispositivo.');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      toast('As notificações estão bloqueadas. Libere nas configurações do site no navegador.');
+      return;
+    }
+    Promise.resolve(Notification.requestPermission()).then(function (p) {
+      if (p === 'granted') { save('notif', '1'); toast('Notificações ativadas neste dispositivo.'); }
+      else toast('Permissão não concedida. As notificações continuam desativadas.');
+      atualizarNotif();
+    });
+  }
+
+  /* ---------- Foto: recorta quadrado e reduz antes de enviar ---------- */
+  function prepararFoto(file) {
+    return new Promise(function (ok, no) {
+      if (!/^image\//.test(file.type)) return no(new Error('Escolha um arquivo de imagem.'));
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        var L = 320, lado = Math.min(img.width, img.height);
+        var c = document.createElement('canvas');
+        c.width = c.height = L;
+        c.getContext('2d').drawImage(img, (img.width - lado) / 2, (img.height - lado) / 2, lado, lado, 0, 0, L, L);
+        URL.revokeObjectURL(url);
+        c.toBlob(function (b) { b ? ok(b) : no(new Error('Não foi possível processar a imagem.')); }, 'image/jpeg', 0.88);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); no(new Error('Não foi possível ler essa imagem.')); };
+      img.src = url;
+    });
+  }
+
+  function trocarFoto(input) {
+    var file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    prepararFoto(file).then(function (blob) {
+      state.fotoNova = blob;
+      if (state.fotoPreview) URL.revokeObjectURL(state.fotoPreview);
+      state.fotoPreview = URL.createObjectURL(blob);
+      var b = document.querySelector('.foto-btn');
+      if (b) b.innerHTML = fotoHTML();
+      toast('Foto escolhida. Toque em "Salvar alterações" para confirmar.');
+    }, function (e) { toast(e.message); });
+  }
+
+  function renderPerfil() {
+    var u = state.user;
+    app.innerHTML =
+      '<form id="form-perfil" class="perfil" novalidate>' +
+        '<div class="perfil-foto">' +
+          '<button type="button" class="foto-btn" data-action="foto" aria-label="Alterar foto de perfil">' + fotoHTML() + '</button>' +
+          '<input type="file" id="foto-input" accept="image/*" hidden>' +
+          '<small>Altere sua foto de perfil</small>' +
+        '</div>' +
+        '<div id="perfil-erro"></div>' +
+        pf('nome', 'Nome completo *', u.nome, '', true) +
+        pf('email', 'E-mail *', u.email, '', true) +
+        pf('telefone', 'Telefone *', mascaraTel(u.telefone), 'inputmode="tel" autocomplete="tel" placeholder="(11) 90000-0000" maxlength="15" data-mask="tel"') +
+        pf('data_nascimento', 'Data nascimento *', dataDeISO(u.data_nascimento), 'inputmode="numeric" autocomplete="bday" placeholder="dd/mm/aaaa" maxlength="10" data-mask="data"') +
+        pf('cpf', 'CPF', mascaraCPF(u.cpf), '', true) +
+        pf('cep', 'CEP', mascaraCEP(u.cep), 'inputmode="numeric" autocomplete="postal-code" placeholder="00000-000" maxlength="9" data-mask="cep"') +
+        pf('rua', 'Rua', u.rua, 'autocomplete="address-line1"') +
+        pf('numero', 'Número', u.numero, 'autocomplete="off"') +
+        pf('complemento', 'Complemento', u.complemento, 'autocomplete="address-line2" placeholder="Apto, bloco…"') +
+        pf('cidade', 'Cidade', u.cidade, 'autocomplete="address-level2"') +
+        pf('bairro', 'Bairro', u.bairro, 'autocomplete="address-level3"') +
+        pf('estado', 'Estado', u.estado, 'autocomplete="address-level1" maxlength="2" placeholder="UF" style="text-transform:uppercase"') +
+        '<div class="link-cards">' +
+          '<button type="button" class="card-link" data-go="seguranca">' + ICO.shield +
+            '<span class="t"><strong>Segurança da conta</strong><small>Senha, autenticação em dois fatores</small></span>' + ICO.chev + '</button>' +
+          '<button type="button" class="card-link" data-go="integracoes">' + ICO.gear +
+            '<span class="t"><strong>Integrações</strong><small>Google Agenda</small></span>' + ICO.chev + '</button>' +
+          '<button type="button" class="card-link" id="btn-notif" role="switch" data-action="notif" aria-checked="' + (notifAtiva() ? 'true' : 'false') + '">' + ICO.bell +
+            '<span class="t"><strong>Notificações</strong><small id="notif-txt">' + esc(notifTexto()) + '</small></span><span class="switch"></span></button>' +
+        '</div>' +
+        '<div class="bottom-bar"><div class="bottom-inner"><button class="btn block" type="submit">Salvar alterações</button></div></div>' +
+      '</form>';
+  }
+
+  function salvarPerfil(form) {
+    var erro = document.getElementById('perfil-erro');
+    var btn = form.querySelector('button[type=submit]');
+    var el = form.elements;
+    function falha(msg) {
+      erro.innerHTML = '<div class="alert">' + esc(msg) + '</div>';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    erro.innerHTML = '';
+
+    var tel = soDigitos(el.telefone.value);
+    if (tel.length < 10 || tel.length > 11) return falha('Informe um telefone válido, com DDD.');
+    var nasc = dataParaISO(el.data_nascimento.value.trim());
+    if (!nasc) return falha('Informe uma data de nascimento válida, no formato dd/mm/aaaa.');
+    var cep = soDigitos(el.cep.value);
+    if (cep && cep.length !== 8) return falha('CEP inválido. Ele deve ter 8 números.');
+    var estado = el.estado.value.trim().toUpperCase();
+    if (estado && !/^[A-Z]{2}$/.test(estado)) return falha('Use a sigla do estado com 2 letras, por exemplo SP.');
+
+    var dados = {
+      telefone: el.telefone.value.trim(),
+      data_nascimento: nasc,
+      cep: cep,
+      rua: el.rua.value.trim(),
+      numero: el.numero.value.trim(),
+      complemento: el.complemento.value.trim(),
+      cidade: el.cidade.value.trim(),
+      bairro: el.bairro.value.trim(),
+      estado: estado,
+    };
+    var corpo = dados;
+    if (state.fotoNova) {
+      corpo = new FormData();
+      Object.keys(dados).forEach(function (k) { corpo.append(k, dados[k]); });
+      corpo.append('foto', state.fotoNova, 'foto.jpg');
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Salvando…';
+    api('/api/auth/perfil/', { method: 'PATCH', body: corpo }).then(function (r) {
+      var novo = Object.assign({}, state.user, (r && typeof r === 'object') ? r : dados);
+      if (state.fotoNova && !(r && r.foto)) novo.foto = state.fotoPreview;
+      state.user = novo;
+      state.fotoNova = null;
+      toast('Perfil atualizado.');
+    }, function (e) {
+      falha(e.message);
+    }).then(function () {
+      btn.disabled = false;
+      btn.textContent = 'Salvar alterações';
+    });
+  }
+
+  /* ============================================================
+     SEGURANÇA DA CONTA
+  ============================================================ */
+  function erroSheet(msg) {
+    var e = document.getElementById('form-erro');
+    if (e) e.innerHTML = '<div class="alert">' + esc(msg) + '</div>';
+  }
+
+  function enviarSheet(form, url, metodo, corpo, depois) {
+    var btn = form.querySelector('button[type=submit]');
+    document.getElementById('form-erro').innerHTML = '';
+    btn.disabled = true;
+    api(url, { method: metodo, body: corpo }).then(function (r) {
+      fecharSheet();
+      depois(r);
+    }, function (e) {
+      erroSheet(e.message);
+      btn.disabled = false;
+    });
+  }
+
+  function campoCodigo(id) {
+    return '<div class="field"><label for="' + id + '">Código de 6 dígitos</label>' +
+      '<input id="' + id + '" name="codigo" class="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" data-mask="cod"></div>';
+  }
+
+  function renderSeguranca() {
+    app.innerHTML = barraTopo('Segurança da conta', 'perfil') +
+      '<div class="stack">' +
+        '<section class="card" id="card-2fa"><p class="hint center">Carregando…</p></section>' +
+        '<section class="card">' +
+          '<div class="card-head"><span class="plain-ico">' + ICO.lock + '</span>' +
+            '<div class="grow"><h3>Senha</h3><p>Altere sua senha de acesso</p></div></div>' +
+          '<button class="btn outline block" data-action="alterar-senha">' + ICO.key + 'Alterar Senha</button>' +
+        '</section>' +
+        '<section class="card">' +
+          '<div class="card-head"><span class="plain-ico">' + ICO.laptop + '</span>' +
+            '<div class="grow"><h3>Sessões Ativas</h3><p>Gerencie os dispositivos conectados à sua conta</p></div></div>' +
+          '<div id="lista-sessoes"><p class="hint center">Carregando…</p></div>' +
+        '</section>' +
+      '</div>';
+    carregar2fa();
+    carregarSessoes();
+  }
+
+  /* ---------- Autenticação em dois fatores ---------- */
+  function desenhar2fa(ativo) {
+    var el = document.getElementById('card-2fa');
+    if (!el) return;
+    el.innerHTML =
+      '<div class="card-head">' +
+        '<span class="ico-badge ' + (ativo ? 'ok' : 'warn') + '">' + (ativo ? ICO.shieldOk : ICO.warn) + '</span>' +
+        '<div class="grow"><h3>Autenticação em Dois Fatores</h3><p>' +
+          (ativo
+            ? 'Sua conta está protegida. A cada novo login vamos pedir o código do seu aplicativo autenticador.'
+            : 'Adicione uma camada extra de segurança à sua conta usando um aplicativo autenticador como Google Authenticator ou Authy.') +
+        '</p></div>' +
+        '<span class="badge ' + (ativo ? 'concluido' : 'aviso') + '">' + (ativo ? 'Ativo' : 'Inativo') + '</span>' +
+      '</div>' +
+      (ativo
+        ? '<button class="btn outline-danger block" data-action="2fa-desativar">Desativar</button>'
+        : '<button class="btn block" data-action="2fa-ativar">Ativar</button>');
+  }
+
+  function carregar2fa() {
+    var el = document.getElementById('card-2fa');
+    if (el) el.innerHTML = '<p class="hint center">Carregando…</p>';
+    api('/api/auth/2fa/').then(function (r) {
+      desenhar2fa(!!(r && r.ativo));
+    }, function (e) {
+      var c = document.getElementById('card-2fa');
+      if (c) c.innerHTML = '<div class="alert">' + esc(e.message) + '</div>' +
+        '<button class="btn outline block" data-action="2fa-recarregar">Tentar novamente</button>';
+    });
+  }
+
+  function corpo2fa(r) {
+    var chave = String(r.secret || '').replace(/\s+/g, '');
+    var agrupada = chave.replace(/(.{4})/g, '$1 ').trim();
+    var qr = (typeof r.qr === 'string' && /^data:image\/(png|jpeg|svg\+xml);/.test(r.qr)) ? r.qr : '';
+    var uri = (typeof r.otpauth_url === 'string' && /^otpauth:\/\//.test(r.otpauth_url)) ? r.otpauth_url : '';
+    return '<ol class="passos">' +
+        '<li>Instale um aplicativo autenticador, como Google Authenticator ou Authy.</li>' +
+        '<li>' + (qr ? 'Escaneie o QR code ou digite a chave abaixo.' : 'Adicione uma conta digitando a chave abaixo.') + '</li>' +
+        '<li>Digite aqui o código de 6 dígitos que o aplicativo mostrar.</li>' +
+      '</ol>' +
+      (qr ? '<div class="qr"><img src="' + esc(qr) + '" alt="QR code para o aplicativo autenticador"></div>' : '') +
+      '<div class="chave"><code id="chave-2fa" data-chave="' + esc(chave) + '">' + esc(agrupada) + '</code>' +
+        '<button type="button" class="btn ghost small" data-action="copiar-chave">Copiar</button></div>' +
+      (uri ? '<a class="link link-centro" href="' + esc(uri) + '">Abrir no aplicativo autenticador</a>' : '') +
+      '<form id="form-2fa-ativar" novalidate><div id="form-erro"></div>' + campoCodigo('f-cod-ativar') +
+        '<button class="btn block" type="submit">Confirmar e ativar</button></form>';
+  }
+
+  function iniciar2fa(btn) {
+    btn.disabled = true;
+    api('/api/auth/2fa/configurar/', { method: 'POST' }).then(function (r) {
+      btn.disabled = false;
+      if (!r || !r.secret) throw new ApiError(500, { detail: 'O servidor não devolveu a chave do autenticador.' });
+      folha('Ativar dois fatores', corpo2fa(r));
+    }).catch(function (e) {
+      btn.disabled = false;
+      toast(e.message);
+    });
+  }
+
+  function copiarChave() {
+    var chave = document.getElementById('chave-2fa').dataset.chave;
+    var manual = function () { toast('Não foi possível copiar. Selecione a chave e copie manualmente.'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(chave).then(function () { toast('Chave copiada.'); }, manual);
+    } else manual();
+  }
+
+  function confirmar2fa(form, ativar) {
+    var codigo = mascaraCodigo(form.elements.codigo.value);
+    if (codigo.length !== 6) return erroSheet('Digite o código de 6 dígitos.');
+    enviarSheet(form, ativar ? '/api/auth/2fa/ativar/' : '/api/auth/2fa/desativar/', 'POST', { codigo: codigo }, function () {
+      toast(ativar ? 'Autenticação em dois fatores ativada.' : 'Autenticação em dois fatores desativada.');
+      desenhar2fa(ativar);
+    });
+  }
+
+  function abrirDesativar2fa() {
+    folha('Desativar dois fatores',
+      '<p class="form-nota">Para desativar, digite o código de 6 dígitos do seu aplicativo autenticador.</p>' +
+      '<form id="form-2fa-desativar" novalidate><div id="form-erro"></div>' + campoCodigo('f-cod-desativar') +
+      '<button class="btn danger block" type="submit">Desativar</button></form>');
+  }
+
+  /* ---------- Alterar senha ---------- */
+  function formSenha() {
+    return '<form id="form-senha" novalidate><div id="form-erro"></div>' +
+      '<div class="field"><label for="f-sa">Senha atual</label><input id="f-sa" name="senha_atual" type="password" autocomplete="current-password" required></div>' +
+      '<div class="field"><label for="f-sn">Nova senha</label><input id="f-sn" name="nova_senha" type="password" autocomplete="new-password" required></div>' +
+      '<div class="field"><label for="f-sc">Confirmar nova senha</label><input id="f-sc" name="confirmar" type="password" autocomplete="new-password" required></div>' +
+      '<button class="btn block" type="submit">Salvar nova senha</button></form>';
+  }
+
+  function salvarSenha(form) {
+    var atual = form.elements.senha_atual.value;
+    var nova = form.elements.nova_senha.value;
+    if (!atual || !nova || !form.elements.confirmar.value) return erroSheet('Preencha todos os campos.');
+    if (nova.length < 8) return erroSheet('A nova senha precisa ter pelo menos 8 caracteres.');
+    if (nova !== form.elements.confirmar.value) return erroSheet('A confirmação não é igual à nova senha.');
+    if (nova === atual) return erroSheet('A nova senha precisa ser diferente da atual.');
+    enviarSheet(form, '/api/auth/alterar-senha/', 'POST', { senha_atual: atual, nova_senha: nova }, function () {
+      toast('Senha alterada com sucesso.');
+    });
+  }
+
+  /* ---------- Sessões ativas ---------- */
+  function carregarSessoes() {
+    api('/api/auth/sessoes/').then(function (d) {
+      desenharSessoes(lista(d));
+    }, function (e) {
+      var box = document.getElementById('lista-sessoes');
+      if (box) box.innerHTML = '<div class="alert">' + esc(e.message) + '</div>' +
+        '<button class="btn outline block" data-action="sessoes-recarregar">Tentar novamente</button>';
+    });
+  }
+
+  function desenharSessoes(itens) {
+    var box = document.getElementById('lista-sessoes');
+    if (!box) return;
+    itens = itens.slice().sort(function (a, b) {
+      if (!!a.atual !== !!b.atual) return a.atual ? -1 : 1;
+      return new Date(b.ultimo_acesso) - new Date(a.ultimo_acesso);
+    });
+    if (!itens.length) { box.innerHTML = '<p class="hint center">Nenhuma sessão ativa encontrada.</p>'; return; }
+    var outras = itens.filter(function (s) { return !s.atual; }).length;
+
+    box.innerHTML = '<div class="sessoes">' + itens.map(function (s) {
+      var movel = /android|ios|iphone|ipad|mobile/i.test(s.dispositivo || '');
+      return '<div class="sessao' + (s.atual ? ' atual' : '') + '">' +
+        '<span class="sessao-ico">' + (movel ? ICO.phone : ICO.desktop) + '</span>' +
+        '<div class="sessao-info">' +
+          '<strong>' + esc(s.dispositivo || 'dispositivo') + (s.atual ? '<span class="badge concluido">Este dispositivo</span>' : '') + '</strong>' +
+          '<span>' + esc(s.descricao) + '</span>' +
+          '<small>IP: ' + esc(s.ip) + ' • ' + esc(haTempo(s.ultimo_acesso)) + '</small>' +
+        '</div>' +
+        (s.atual ? '' : '<button class="btn outline-danger small" data-sessao="' + esc(s.id) + '">Encerrar</button>') +
+      '</div>';
+    }).join('') + '</div>' +
+    (outras
+      ? '<button class="btn outline-danger block" data-action="encerrar-outras">' + ICO.logout + 'Sair de todos os outros dispositivos</button>' +
+        '<p class="nota">Ao sair de todos os outros dispositivos, essa sessão continuará ativa.</p>'
+      : '');
+  }
+
+  function encerrarSessao(id, btn) {
+    if (!window.confirm('Encerrar esta sessão? O dispositivo será desconectado.')) return;
+    btn.disabled = true;
+    api('/api/auth/sessoes/' + encodeURIComponent(id) + '/', { method: 'DELETE' }).then(function () {
+      toast('Sessão encerrada.');
+      carregarSessoes();
+    }, function (e) {
+      toast(e.message);
+      btn.disabled = false;
+    });
+  }
+
+  function encerrarOutras(btn) {
+    if (!window.confirm('Sair de todos os outros dispositivos? Esta sessão continuará ativa.')) return;
+    btn.disabled = true;
+    api('/api/auth/sessoes/encerrar-outras/', { method: 'POST' }).then(function () {
+      toast('Os outros dispositivos foram desconectados.');
+      carregarSessoes();
+    }, function (e) {
+      toast(e.message);
+      btn.disabled = false;
+    });
+  }
+
+  /* ============================================================
+     INTEGRAÇÕES · GOOGLE AGENDA
+  ============================================================ */
+  function renderIntegracoes() {
+    app.innerHTML = barraTopo('Integrações', 'perfil') +
+      '<div class="stack"><section class="card" id="card-google"><p class="hint center">Carregando…</p></section></div>';
+    carregarGoogle();
+  }
+
+  function carregarGoogle() {
+    var el = document.getElementById('card-google');
+    if (el) el.innerHTML = '<p class="hint center">Carregando…</p>';
+    api('/api/agenda/google/').then(function (r) {
+      desenharGoogle(!!(r && r.conectado));
+    }, function (e) {
+      var c = document.getElementById('card-google');
+      if (c) c.innerHTML = '<div class="alert">' + esc(e.message) + '</div>' +
+        '<button class="btn outline block" data-action="google-recarregar">Tentar novamente</button>';
+    });
+  }
+
+  function desenharGoogle(conectado) {
+    var el = document.getElementById('card-google');
+    if (!el) return;
+    el.innerHTML =
+      '<div class="card-head centro"><span class="ico-badge blue">' + ICO.cal + '</span><h3>Google Agenda</h3></div>' +
+      '<p class="card-texto">' + (conectado
+        ? 'Seus agendamentos são sincronizados automaticamente com o seu Google Agenda.'
+        : 'Conecte sua conta Google para sincronizar seus agendamentos automaticamente com o Google Agenda.') + '</p>' +
+      '<span class="badge com-icone ' + (conectado ? 'concluido' : 'cancelado') + '">' + (conectado ? ICO.checkCircle + 'Conectado' : 'Não conectado') + '</span>' +
+      (conectado
+        ? '<button class="btn outline-danger block" data-action="google-remover">' + ICO.calX + 'Remover integração</button>'
+        : '<button class="btn block" data-action="google-conectar">Conectar Google Agenda</button>');
+  }
+
+  function conectarGoogle(btn) {
+    btn.disabled = true;
+    api('/api/agenda/google/conectar/').then(function (r) {
+      if (r && typeof r.url === 'string' && /^https:\/\//.test(r.url)) { window.location.href = r.url; return; }
+      throw new ApiError(500, { detail: 'O servidor não devolveu o endereço de autorização do Google.' });
+    }).catch(function (e) {
+      btn.disabled = false;
+      toast(e.message);
+    });
+  }
+
+  function removerGoogle(btn) {
+    if (!window.confirm('Remover a integração com o Google Agenda? Seus próximos agendamentos deixarão de ser sincronizados.')) return;
+    btn.disabled = true;
+    api('/api/agenda/google/', { method: 'DELETE' }).then(function () {
+      toast('Integração removida.');
+      desenharGoogle(false);
+    }, function (e) {
+      toast(e.message);
       btn.disabled = false;
     });
   }
@@ -498,10 +1504,10 @@
   }
 
   /* ---------- Novo agendamento ---------- */
-  function barraTopo() {
-    return '<div class="head-bar"><button class="back" data-go="agendar" aria-label="Voltar">' +
+  function barraTopo(titulo, destino) {
+    return '<div class="head-bar"><button class="back" data-go="' + (destino || 'agendar') + '" aria-label="Voltar">' +
       '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M15 6l-6 6 6 6"/></svg>' +
-      '</button><h1 class="bar-title">Novo agendamento</h1></div>';
+      '</button><h1 class="bar-title">' + esc(titulo || 'Novo agendamento') + '</h1></div>';
   }
 
   function renderNovo() {
@@ -742,6 +1748,10 @@
       '<div class="loading">Carregando…</div>';
 
     api('/api/agenda/agendamentos/').then(function (d) {
+      if (state.user.tipo === 'profissional') {
+        state.agItens = lista(d);
+        return desenharAgendaProf();
+      }
       desenharMeus(lista(d));
     }, function (e) {
       app.innerHTML = '<div class="page-head"><h1>Agenda</h1></div><div class="alert">' + esc(e.message) + '</div>';
@@ -790,6 +1800,100 @@
     app.innerHTML = h;
   }
 
+  /* ---------- Agenda do profissional: semana à esquerda, detalhes à direita ---------- */
+  var DIAS_LONGOS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+
+  function chaveDia(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function segundaDa(d) {
+    var s = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    s.setDate(s.getDate() - (s.getDay() + 6) % 7);
+    return s;
+  }
+
+  function horaDe(iso) {
+    return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function desenharAgendaProf() {
+    if (!state.agSemana) state.agSemana = segundaDa(new Date());
+    var ini = state.agSemana, hoje = chaveDia(new Date());
+    var dias = [];
+    for (var i = 0; i < 7; i++) dias.push(new Date(ini.getFullYear(), ini.getMonth(), ini.getDate() + i));
+    var porDia = {};
+    state.agItens.forEach(function (a) {
+      var k = chaveDia(new Date(a.inicio));
+      (porDia[k] = porDia[k] || []).push(a);
+    });
+    Object.keys(porDia).forEach(function (k) { porDia[k].sort(function (a, b) { return a.inicio < b.inicio ? -1 : 1; }); });
+    var periodo = ini.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' }) + ' – ' +
+      dias[6].toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' });
+    var diaSel = dias.filter(function (d) { return chaveDia(d) === state.agDia; })[0];
+
+    var semana = dias.map(function (d) {
+      var k = chaveDia(d), itens = porDia[k] || [];
+      var linhas = itens.map(function (a) { return '<span class="ag-linha ' + esc(a.status) + '"></span>'; }).join('');
+      return '<button type="button" class="ag-dia' + (k === hoje ? ' hoje' : '') + (k === state.agDia ? ' ativo' : '') + '" data-ag-dia="' + k + '"' +
+        ' aria-pressed="' + (k === state.agDia) + '">' +
+        '<span class="ag-dia-topo"><span class="ag-dia-nome">' + DIAS_LONGOS[d.getDay()] + '</span>' +
+        '<span class="ag-dia-num">' + d.getDate() + '</span>' +
+        '<span class="ag-dia-qtd">' + (itens.length ? itens.length + ' agend.' : 'Livre') + '</span></span>' +
+        (linhas ? '<span class="ag-linhas">' + linhas + '</span>' : '') + '</button>';
+    }).join('');
+
+    app.innerHTML = '<div class="page-head"><h1 style="font-size:clamp(34px,6vw,52px)">Agendamentos</h1>' +
+      '<p>Toque em um dia para ver os atendimentos.</p></div>' +
+      '<div class="ag-nav"><button class="ag-seta" data-action="ag-semana" data-passo="-1" aria-label="Semana anterior">‹</button>' +
+      '<strong>' + esc(periodo) + '</strong>' +
+      '<button class="ag-seta" data-action="ag-semana" data-passo="1" aria-label="Próxima semana">›</button>' +
+      '<button class="btn ghost small" data-action="ag-semana" data-passo="0">Hoje</button></div>' +
+      '<div class="ag-layout' + (diaSel ? ' com-detalhe' : '') + '"><div class="ag-semana">' + semana + '</div>' +
+      (diaSel ? detalheDia(diaSel, porDia[state.agDia] || []) : '') + '</div>';
+  }
+
+  function detalheDia(d, itens) {
+    var agora = new Date();
+    var lista = itens.map(function (a) {
+      var podeFinalizar = a.status === 'confirmado' && new Date(a.inicio) <= agora;
+      return '<article class="ag-item ' + esc(a.status) + '">' +
+        '<div class="ag-item-topo"><strong>' + horaDe(a.inicio) + ' – ' + horaDe(a.fim) + '</strong>' +
+        '<span class="badge ' + esc(a.status) + '">' + esc(STATUS[a.status] || a.status) + '</span></div>' +
+        '<h4>' + esc(a.servico_nome) + '</h4>' +
+        '<dl class="ag-info"><dt>Cliente</dt><dd>' + esc(a.cliente_nome) + '</dd>' +
+          '<dt>Valor</dt><dd>' + brl(a.preco_cobrado) + '</dd>' +
+          (a.observacoes ? '<dt>Observações</dt><dd>' + esc(a.observacoes) + '</dd>' : '') + '</dl>' +
+        (podeFinalizar ? '<div class="ag-acoes"><button class="btn small" data-action="ag-finalizar" data-acao="concluir" data-id="' + a.id + '">Concluir</button>' +
+          '<button class="btn ghost small" data-action="ag-finalizar" data-acao="faltou" data-id="' + a.id + '">Cliente faltou</button></div>' : '') +
+        '</article>';
+    }).join('');
+    return '<aside class="card ag-detalhe">' +
+      '<button class="ag-fechar" data-action="ag-fechar" aria-label="Fechar detalhes">×</button>' +
+      '<h3>' + esc(DIAS_LONGOS[d.getDay()] + ', ' + d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long' })) + '</h3>' +
+      '<p class="graf-sub">' + (itens.length ? itens.length + ' agendamento(s)' : 'Nenhum agendamento neste dia.') + '</p>' +
+      lista + '</aside>';
+  }
+
+  function mudarSemana(passo) {
+    var s = state.agSemana;
+    state.agSemana = passo ? new Date(s.getFullYear(), s.getMonth(), s.getDate() + 7 * passo) : segundaDa(new Date());
+    state.agDia = null;
+    desenharAgendaProf();
+  }
+
+  function finalizarAgendamento(btn) {
+    btn.disabled = true;
+    api('/api/agenda/agendamentos/' + btn.dataset.id + '/' + btn.dataset.acao + '/', { method: 'POST' }).then(function (a) {
+      state.agItens = state.agItens.map(function (x) { return x.id === a.id ? a : x; });
+      toast(btn.dataset.acao === 'concluir' ? 'Atendimento concluído.' : 'Falta registrada.');
+      desenharAgendaProf();
+    }, function (e) {
+      toast(e.message);
+      btn.disabled = false;
+    });
+  }
+
   function cancelar(id, btn) {
     if (!window.confirm('Deseja cancelar este agendamento?')) return;
     btn.disabled = true;
@@ -814,6 +1918,28 @@
     if (el.dataset.action === 'sair') return sair();
     if (el.dataset.action === 'confirmar') return confirmar(el);
     if (el.dataset.cancelar) return cancelar(el.dataset.cancelar, el);
+    if (el.dataset.agDia) {
+      state.agDia = state.agDia === el.dataset.agDia ? null : el.dataset.agDia;
+      return desenharAgendaProf();
+    }
+    if (el.dataset.action === 'ag-semana') return mudarSemana(Number(el.dataset.passo));
+    if (el.dataset.action === 'ag-fechar') { state.agDia = null; return desenharAgendaProf(); }
+    if (el.dataset.action === 'ag-finalizar') return finalizarAgendamento(el);
+
+    if (el.dataset.action === 'voltar-login') { state.authTab = 'login'; state.token2fa = null; return renderHome(); }
+    if (el.dataset.action === 'foto') return document.getElementById('foto-input').click();
+    if (el.dataset.action === 'notif') return alternarNotif();
+    if (el.dataset.action === 'alterar-senha') return folha('Alterar senha', formSenha());
+    if (el.dataset.action === '2fa-ativar') return iniciar2fa(el);
+    if (el.dataset.action === '2fa-desativar') return abrirDesativar2fa();
+    if (el.dataset.action === '2fa-recarregar') return carregar2fa();
+    if (el.dataset.action === 'copiar-chave') return copiarChave();
+    if (el.dataset.action === 'sessoes-recarregar') return carregarSessoes();
+    if (el.dataset.action === 'encerrar-outras') return encerrarOutras(el);
+    if (el.dataset.sessao) return encerrarSessao(el.dataset.sessao, el);
+    if (el.dataset.action === 'google-conectar') return conectarGoogle(el);
+    if (el.dataset.action === 'google-remover') return removerGoogle(el);
+    if (el.dataset.action === 'google-recarregar') return carregarGoogle();
 
     if (el.dataset.action === 'menu') return abrirMenu();
     if (el.dataset.action === 'fechar-menu') return fecharMenu();
@@ -823,6 +1949,15 @@
     }
     if (el.dataset.action === 'novo-prof') return abrirProf(null);
     if (el.dataset.action === 'editar-prof') return abrirProf(Number(el.dataset.id));
+    if (el.dataset.action === 'remover-prof') return removerProf(Number(el.dataset.id), el);
+    if (el.dataset.action === 'add-janela') return addJanela(el);
+    if (el.dataset.action === 'rm-janela') return rmJanela(el);
+    if (el.dataset.grafAbrir) {
+      state.graf.aberto = state.graf.aberto === el.dataset.grafAbrir ? null : el.dataset.grafAbrir;
+      return desenharGraficos();
+    }
+    if (el.dataset.grafAba) return;
+    if (el.dataset.action === 'graf-mes') return mudarMesGraf(Number(el.dataset.passo));
     if (el.dataset.action === 'fechar') return fecharSheet();
     if (el.dataset.sheet) return abrirSheet(el.dataset.sheet);
     if (el.dataset.prof) return escolherProf(Number(el.dataset.prof));
@@ -843,19 +1978,54 @@
     if (ev.key === 'Escape') { fecharSheet(); fecharMenu(); }
   });
 
+  // Máscaras (CPF, CEP, telefone, data, código) e busca de endereço pelo CEP
+  document.addEventListener('input', function (ev) {
+    var el = ev.target;
+    var mascara = el.dataset && MASCARAS[el.dataset.mask];
+    if (!mascara) return;
+    var v = mascara(el.value);
+    if (v !== el.value) el.value = v;
+    if (el.dataset.mask === 'cep') buscarCep(el);
+  });
+
+  document.addEventListener('change', function (ev) {
+    if (ev.target.id === 'foto-input') trocarFoto(ev.target);
+    if (ev.target.closest('[data-graf-filtro]')) mudarFiltroGraf(ev.target);
+    if (ev.target.hasAttribute('data-dia-ativo')) marcarDiaTrab(ev.target);
+  });
+
+  document.addEventListener('mousemove', mostrarTip);
+
   document.addEventListener('submit', function (ev) {
     var fid = ev.target.id;
     if (fid === 'auth-form') { ev.preventDefault(); submeterAuth(ev.target); }
+    else if (fid === 'form-2fa-login') { ev.preventDefault(); verificar2faLogin(ev.target); }
     else if (fid === 'form-servico') { ev.preventDefault(); salvarServico(ev.target); }
     else if (fid === 'form-prof') { ev.preventDefault(); salvarProf(ev.target); }
+    else if (fid === 'form-perfil') { ev.preventDefault(); salvarPerfil(ev.target); }
+    else if (fid === 'form-senha') { ev.preventDefault(); salvarSenha(ev.target); }
+    else if (fid === 'form-2fa-ativar') { ev.preventDefault(); confirmar2fa(ev.target, true); }
+    else if (fid === 'form-2fa-desativar') { ev.preventDefault(); confirmar2fa(ev.target, false); }
   });
 
   /* ------------------------------------------------------------
      Início
   ------------------------------------------------------------ */
+  // Retorno do consentimento do Google: o servidor redireciona para /?google=ok (ou erro)
+  var retornoGoogle = null;
+  try {
+    retornoGoogle = new URLSearchParams(window.location.search).get('google');
+    if (retornoGoogle) window.history.replaceState(null, '', window.location.pathname);
+  } catch (e) {}
+
   if (state.access) {
     app.innerHTML = '<div class="loading">Carregando…</div>';
-    carregarPerfil().catch(function () { sair(true); });
+    carregarPerfil().then(function () {
+      if (!retornoGoogle) return;
+      state.view = 'integracoes';
+      render();
+      toast(retornoGoogle === 'ok' ? 'Google Agenda conectado com sucesso.' : 'Não foi possível conectar o Google Agenda.');
+    }, function () { sair(true); });
   } else {
     render();
   }
