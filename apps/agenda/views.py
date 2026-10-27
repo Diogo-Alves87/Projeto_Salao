@@ -13,6 +13,7 @@ from rest_framework.views import APIView
 
 from apps.catalogo.models import Profissional, Servico
 
+from . import google_agenda
 from .models import Agendamento
 from .permissions import PodeAgendar
 from .serializers import AgendamentoSerializer
@@ -48,6 +49,9 @@ class AgendamentoViewSet(
             qs = qs.filter(status=params['status'])
         return qs
 
+    def perform_create(self, serializer):
+        google_agenda.agendamento_criado(serializer.save())
+
     @action(detail=True, methods=['post'])
     def cancelar(self, request, pk=None):
         agendamento = self.get_object()
@@ -68,6 +72,7 @@ class AgendamentoViewSet(
 
         agendamento.status = Agendamento.Status.CANCELADO
         agendamento.save()
+        google_agenda.agendamento_cancelado(agendamento)
         return Response(self.get_serializer(agendamento).data)
 
     def _finalizar(self, request, novo_status):

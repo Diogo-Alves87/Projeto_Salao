@@ -57,7 +57,23 @@ class RegistroSerializer(serializers.ModelSerializer):
 
 
 class UsuarioSerializer(serializers.ModelSerializer):
+    """Perfil do usuário logado. Nome, e-mail, CPF e tipo não mudam por aqui."""
+
+    cep = serializers.CharField(max_length=9, required=False, allow_blank=True)
+
     class Meta:
         model = Usuario
-        fields = ('id', 'nome', 'email', 'telefone', 'tipo')
-        read_only_fields = fields
+        fields = ('id', 'nome', 'email', 'tipo', 'cpf', 'telefone', 'data_nascimento', 'foto') + CAMPOS_ENDERECO
+        read_only_fields = ('id', 'nome', 'email', 'tipo', 'cpf')
+
+    def validate_cep(self, valor):
+        cep = so_digitos(valor)
+        if cep and len(cep) != 8:
+            raise serializers.ValidationError('O CEP deve ter 8 números.')
+        return cep
+
+    def validate_estado(self, valor):
+        estado = (valor or '').strip().upper()
+        if estado and not re.fullmatch(r'[A-Z]{2}', estado):
+            raise serializers.ValidationError('Use a sigla do estado com 2 letras, por exemplo SP.')
+        return estado

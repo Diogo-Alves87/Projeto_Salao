@@ -4,3 +4,10 @@ __pycache__/
 db.sqlite3
 .env
 .vscode/
+
+# Uploads e arquivos gerados
+media/
+staticfiles/
+
+# Dados locais (nunca publicar senhas)
+USUARIOS TESTES.txt

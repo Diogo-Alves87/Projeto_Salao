@@ -151,3 +151,42 @@ class Agendamento(models.Model):
         if self.preco_cobrado is None:
             self.preco_cobrado = self.servico.preco
         super().save(*args, **kwargs)
+
+
+class ContaGoogle(models.Model):
+    """Conta Google conectada por um usuário (tokens do OAuth).
+
+    A configuração do Google (chaves, escopos) fica em config/google_services.py.
+    """
+
+    usuario = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='conta_google'
+    )
+    email = models.EmailField('e-mail Google', blank=True)
+    access_token = models.TextField()
+    refresh_token = models.TextField(blank=True)
+    expira_em = models.DateTimeField()
+    conectado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'conta Google'
+        verbose_name_plural = 'contas Google'
+
+    def __str__(self):
+        return f'{self.usuario} · {self.email or "Google"}'
+
+
+class EventoGoogle(models.Model):
+    """Evento criado no Google Agenda de um usuário para um agendamento."""
+
+    conta = models.ForeignKey(ContaGoogle, on_delete=models.CASCADE, related_name='eventos')
+    agendamento = models.ForeignKey(Agendamento, on_delete=models.CASCADE, related_name='eventos_google')
+    evento_id = models.CharField(max_length=255)
+
+    class Meta:
+        verbose_name = 'evento no Google Agenda'
+        verbose_name_plural = 'eventos no Google Agenda'
+        constraints = [
+            models.UniqueConstraint(fields=['conta', 'agendamento'], name='evento_google_unico'),
+        ]
+

@@ -1303,7 +1303,8 @@
     var el = document.getElementById('card-google');
     if (el) el.innerHTML = '<p class="hint center">Carregando…</p>';
     api('/api/agenda/google/').then(function (r) {
-      desenharGoogle(!!(r && r.conectado));
+      if (r && r.configurado === false) return desenharGoogleIndisponivel();
+      desenharGoogle(!!(r && r.conectado), r && r.email);
     }, function (e) {
       var c = document.getElementById('card-google');
       if (c) c.innerHTML = '<div class="alert">' + esc(e.message) + '</div>' +
@@ -1311,13 +1312,23 @@
     });
   }
 
-  function desenharGoogle(conectado) {
+  // Site ainda sem as chaves do Google (config/google_services.py)
+  function desenharGoogleIndisponivel() {
+    var el = document.getElementById('card-google');
+    if (!el) return;
+    el.innerHTML =
+      '<div class="card-head centro"><span class="ico-badge blue">' + ICO.cal + '</span><h3>Google Agenda</h3></div>' +
+      '<p class="card-texto">A sincronização com o Google Agenda ainda não está disponível. Em breve você poderá conectar sua conta Google aqui.</p>' +
+      '<span class="badge com-icone cancelado">Em breve</span>';
+  }
+
+  function desenharGoogle(conectado, email) {
     var el = document.getElementById('card-google');
     if (!el) return;
     el.innerHTML =
       '<div class="card-head centro"><span class="ico-badge blue">' + ICO.cal + '</span><h3>Google Agenda</h3></div>' +
       '<p class="card-texto">' + (conectado
-        ? 'Seus agendamentos são sincronizados automaticamente com o seu Google Agenda.'
+        ? 'Seus agendamentos são sincronizados automaticamente com o seu Google Agenda' + (email ? ' (' + esc(email) + ')' : '') + '.'
         : 'Conecte sua conta Google para sincronizar seus agendamentos automaticamente com o Google Agenda.') + '</p>' +
       '<span class="badge com-icone ' + (conectado ? 'concluido' : 'cancelado') + '">' + (conectado ? ICO.checkCircle + 'Conectado' : 'Não conectado') + '</span>' +
       (conectado

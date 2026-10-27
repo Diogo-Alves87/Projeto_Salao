@@ -12,8 +12,11 @@ class RegistroView(generics.CreateAPIView):
     permission_classes = [permissions.AllowAny]
 
 
-class PerfilView(generics.RetrieveAPIView):
+class PerfilView(generics.RetrieveUpdateAPIView):
+    """GET: dados do usuário logado. PATCH: atualiza telefone, nascimento, foto e endereço."""
+
     serializer_class = UsuarioSerializer
+    http_method_names = ['get', 'patch', 'head', 'options']
 
     def get_object(self):
         return self.request.user
