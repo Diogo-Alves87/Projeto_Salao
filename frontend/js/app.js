@@ -150,18 +150,6 @@
       .catch(function () { input.dataset.cepBuscado = ''; });
   }
 
-  function haTempo(iso) {
-    var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-    function plural(n, um, varios) { return 'há ' + n + ' ' + (n === 1 ? um : varios); }
-    if (isNaN(s)) return '';
-    if (s < 60) return 'há menos de um minuto';
-    if (s < 3600) return plural(Math.floor(s / 60), 'minuto', 'minutos');
-    if (s < 86400) return plural(Math.floor(s / 3600), 'hora', 'horas');
-    if (s < 86400 * 30) return plural(Math.floor(s / 86400), 'dia', 'dias');
-    if (s < 86400 * 365) return plural(Math.floor(s / (86400 * 30)), 'mês', 'meses');
-    return plural(Math.floor(s / (86400 * 365)), 'ano', 'anos');
-  }
-
   var toastTimer;
   function toast(msg) {
     toastEl.textContent = msg;
@@ -170,7 +158,7 @@
     toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 3500);
   }
 
-  var CAMPOS = { nome: 'Nome', email: 'E-mail', telefone: 'Telefone', password: 'Senha', inicio: 'Horário', servico: 'Serviço', profissional: 'Profissional', cliente: 'Cliente', descricao: 'Descrição', duracao_minutos: 'Duração', preco: 'Preço', servicos: 'Serviços', intervalo_minutos: 'Intervalo', usuario: 'Usuário',
+  var CAMPOS = { nome: 'Nome', email: 'E-mail', telefone: 'Telefone', password: 'Senha', inicio: 'Horário', servico: 'Serviço', profissional: 'Profissional', cliente: 'Cliente', descricao: 'Descrição', duracao_minutos: 'Duração', preco: 'Preço', servicos: 'Serviços', intervalo_minutos: 'Intervalo', usuario: 'Usuário', horarios: 'Dias de trabalho', comissao_percentual: 'Comissão',
     cpf: 'CPF', cep: 'CEP', rua: 'Rua', numero: 'Número', complemento: 'Complemento', cidade: 'Cidade', bairro: 'Bairro', estado: 'Estado',
     data_nascimento: 'Data de nascimento', foto: 'Foto', senha_atual: 'Senha atual', nova_senha: 'Nova senha', codigo: 'Código' };
 
@@ -326,6 +314,7 @@
 
   /* ---------- Menu lateral ---------- */
   var ICO = {
+    chart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 20V10h3v10H4zm6.5 0V4h3v16h-3zM17 20v-7h3v7h-3z"/></svg>',
     menu: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/></svg>',
     home: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3 2 12h3v8h5v-5h4v5h5v-8h3L12 3z"/></svg>',
     cal: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zM5 10h14v10H5V10z"/></svg>',
@@ -351,7 +340,7 @@
     chev: '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 6l6 6-6 6"/></svg>'
   };
 
-  var TITULOS = { agendar: 'Início', novo: 'Início', meus: 'Agendamentos', planos: 'Planos', servicos: 'Serviços', profissionais: 'Profissionais', perfil: 'Perfil', seguranca: 'Perfil', integracoes: 'Perfil' };
+  var TITULOS = { agendar: 'Início', novo: 'Início', meus: 'Agendamentos', planos: 'Planos', servicos: 'Serviços', profissionais: 'Profissionais', graficos: 'Gráficos', perfil: 'Perfil', integracoes: 'Perfil' };
 
   function itensMenu() {
     var t = state.user.tipo;
@@ -360,6 +349,7 @@
       ['meus', 'Agendamentos', ICO.cal],
       ['servicos', 'Serviços', ICO.tag],
       ['profissionais', 'Profissionais', ICO.users],
+      ['graficos', 'Gráficos', ICO.chart],
       ['admin', 'Painel completo', ICO.gear],
     ];
     else if (t === 'profissional') itens = [['meus', 'Agendamentos', ICO.cal]];
@@ -368,7 +358,7 @@
     return itens;
   }
 
-  var SUBTELAS_PERFIL = ['seguranca', 'integracoes'];
+  var SUBTELAS_PERFIL = ['integracoes'];
 
   function avatarHTML(u, classe) {
     return '<span class="avatar ' + (classe || '') + '">' +
@@ -500,28 +490,119 @@
       state.admServicos = lista(r[1]);
       app.innerHTML = cabecalhoAdmin('Profissionais', 'novo-prof', '+ Novo profissional') +
         (state.admProfs.length ? '<div class="list">' + state.admProfs.map(function (p) {
-          return '<article class="appt"><div><div class="what">' + esc(p.nome) + '</div>' +
-            '<div class="who">' + p.servicos.length + ' serviço(s) · horários de ' + esc(p.intervalo_minutos) + ' em ' + esc(p.intervalo_minutos) + ' min</div></div>' +
+          return '<button type="button" class="appt appt-btn" data-action="editar-prof" data-id="' + p.id + '">' +
+            '<div><div class="what">' + esc(p.nome) + '</div>' +
+            '<div class="who">' + p.servicos.length + ' serviço(s) · ' + resumoDias(p.horarios || []) +
+            ' · comissão ' + Number(p.comissao_percentual).toLocaleString('pt-BR') + '%</div></div>' +
             '<div class="appt-side"><span class="badge ' + (p.ativo ? 'confirmado' : 'cancelado') + '">' + (p.ativo ? 'Ativo' : 'Inativo') + '</span>' +
-            '<button class="btn ghost small" data-action="editar-prof" data-id="' + p.id + '">Editar</button></div></article>';
+            ICO.chev + '</div></button>';
         }).join('') + '</div>' : '<div class="empty">Nenhum profissional cadastrado.</div>') +
-        '<p class="hint">Dias e horários de trabalho, e novos usuários, ficam no <a class="link" href="/admin/">painel completo</a>.</p>';
+        '<p class="hint">Clique em um profissional para editar dias, horários, comissão ou removê-lo. Folgas e bloqueios pontuais ficam no <a class="link" href="/admin/">painel completo</a>.</p>';
     }, erroAdmin);
   }
 
+  /* Dias de trabalho: um bloco por dia (0 = segunda ... 6 = domingo), cada um com uma ou mais janelas */
+  var NOMES_DIAS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
+
+  function resumoDias(horarios) {
+    var dias = [];
+    horarios.forEach(function (h) { if (dias.indexOf(h.dia_semana) === -1) dias.push(h.dia_semana); });
+    if (!dias.length) return '<span class="aviso-sem-horario">sem dias de trabalho (não aparece para agendar)</span>';
+    return dias.sort().map(function (d) { return NOMES_DIAS[d].slice(0, 3); }).join(', ');
+  }
+
+  function janelaHTML(ini, fim) {
+    return '<div class="janela"><input type="time" data-ini value="' + esc(ini || '09:00') + '" aria-label="Início">' +
+      '<span>às</span><input type="time" data-fim value="' + esc(fim || '18:00') + '" aria-label="Fim">' +
+      '<button type="button" class="janela-rm" data-action="rm-janela" aria-label="Remover horário">×</button></div>';
+  }
+
+  function diasTrabalho(horarios) {
+    return '<div class="field"><label>Dias e horários de trabalho</label><div class="checks dias-trab">' +
+      NOMES_DIAS.map(function (nome, dia) {
+        var hs = horarios.filter(function (h) { return h.dia_semana === dia; });
+        return '<div class="dia-trab' + (hs.length ? '' : ' off') + '" data-dia="' + dia + '">' +
+          '<label class="check-row"><input type="checkbox" data-dia-ativo' + (hs.length ? ' checked' : '') + '> ' + nome + '</label>' +
+          '<div class="janelas">' + hs.map(function (h) { return janelaHTML(h.hora_inicio, h.hora_fim); }).join('') + '</div>' +
+          '<button type="button" class="link janela-add" data-action="add-janela">+ outro horário</button></div>';
+      }).join('') + '</div></div>';
+  }
+
+  function marcarDiaTrab(input) {
+    var bloco = input.closest('.dia-trab');
+    bloco.classList.toggle('off', !input.checked);
+    var janelas = bloco.querySelector('.janelas');
+    if (input.checked && !janelas.children.length) janelas.insertAdjacentHTML('beforeend', janelaHTML());
+  }
+
+  function addJanela(btn) {
+    var janelas = btn.closest('.dia-trab').querySelector('.janelas');
+    var ultima = janelas.lastElementChild;
+    // Sugere começar onde o horário anterior terminou (ex.: 13:00 depois do almoço)
+    janelas.insertAdjacentHTML('beforeend', ultima ? janelaHTML(ultima.querySelector('[data-fim]').value, '18:00') : janelaHTML());
+  }
+
+  function rmJanela(btn) {
+    var bloco = btn.closest('.dia-trab');
+    btn.closest('.janela').remove();
+    if (!bloco.querySelector('.janela')) {
+      bloco.classList.add('off');
+      bloco.querySelector('[data-dia-ativo]').checked = false;
+    }
+  }
+
+  function lerHorarios(form) {
+    var horarios = [], erro = null;
+    [].forEach.call(form.querySelectorAll('.dia-trab'), function (bloco) {
+      if (!bloco.querySelector('[data-dia-ativo]').checked) return;
+      var dia = Number(bloco.dataset.dia);
+      [].forEach.call(bloco.querySelectorAll('.janela'), function (j) {
+        var ini = j.querySelector('[data-ini]').value, fim = j.querySelector('[data-fim]').value;
+        if (!ini || !fim) erro = erro || NOMES_DIAS[dia] + ': preencha início e fim.';
+        else if (fim <= ini) erro = erro || NOMES_DIAS[dia] + ': o fim deve ser depois do início.';
+        horarios.push({ dia_semana: dia, hora_inicio: ini, hora_fim: fim });
+      });
+    });
+    return { horarios: horarios, erro: erro };
+  }
+
   function formProf(p, usuarios) {
-    var sel = usuarios ? '<div class="field"><label>Usuário</label><select name="usuario">' + usuarios.map(function (u) {
-      return '<option value="' + u.id + '">' + esc(u.nome) + ' (' + esc(u.email) + ')</option>';
-    }).join('') + '</select></div>' : '';
+    var sel = usuarios ? '<div class="field"><label>Usuário que será promovido a profissional</label>' +
+      '<input type="search" id="busca-usuario" placeholder="Buscar por nome ou e-mail" autocomplete="off">' +
+      '<select name="usuario" size="6" required>' + usuarios.map(function (u, i) {
+        return '<option value="' + u.id + '"' + (i === 0 ? ' selected' : '') + '>' + esc(u.nome) + ' (' + esc(u.email) + ')</option>';
+      }).join('') + '</select></div>' : '';
     var checks = (state.admServicos || []).map(function (x) {
       return '<label class="check-row"><input type="checkbox" name="servicos" value="' + x.id + '"' +
         (p && p.servicos.indexOf(x.id) !== -1 ? ' checked' : '') + '> ' + esc(x.nome) + '</label>';
     }).join('');
     return '<form id="form-prof" data-id="' + (p ? p.id : '') + '" novalidate><div id="form-erro"></div>' + sel +
       '<div class="field"><label>Serviços que realiza</label><div class="checks">' + (checks || '<p class="hint">Cadastre serviços primeiro.</p>') + '</div></div>' +
+      diasTrabalho(p ? p.horarios || [] : []) +
       campo('intervalo_minutos', 'Intervalo entre horários (minutos)', p ? p.intervalo_minutos : 15, 'number', 'min="5" max="120"') +
+      '<div class="field"><label for="f-comissao">Comissão</label><div class="campo-prefixo"><span>%</span>' +
+        '<input id="f-comissao" name="comissao_percentual" type="number" min="0" max="100" step="0.01" inputmode="decimal" value="' +
+        esc(p ? Number(p.comissao_percentual) : 0) + '"></div>' +
+        '<small class="hint">Porcentagem do valor dos serviços que fica com o profissional.</small></div>' +
       '<div class="field"><label class="check-row"><input type="checkbox" name="ativo"' + (!p || p.ativo ? ' checked' : '') + '> Ativo</label></div>' +
-      '<button class="btn block" type="submit">Salvar</button></form>';
+      '<button class="btn block" type="submit">Salvar</button>' +
+      (p ? '<button class="btn danger block" type="button" data-action="remover-prof" data-id="' + p.id + '" style="margin-top:10px">Remover profissional</button>' : '') +
+      '</form>';
+  }
+
+  function removerProf(id, btn) {
+    var p = state.admProfs.filter(function (x) { return x.id === id; })[0];
+    if (!window.confirm('Remover ' + p.nome + ' dos profissionais? A conta continuará existindo como cliente.')) return;
+    btn.disabled = true;
+    api('/api/catalogo/profissionais/' + id + '/', { method: 'DELETE' }).then(function () {
+      state.profissionais = [];
+      fecharSheet();
+      toast('Profissional removido.');
+      renderProfissionais();
+    }, function (e) {
+      document.getElementById('form-erro').innerHTML = '<div class="alert">' + esc(e.message) + '</div>';
+      btn.disabled = false;
+    });
   }
 
   function abrirProf(id) {
@@ -530,21 +611,346 @@
       return folha('Editar ' + p.nome, formProf(p, null));
     }
     api('/api/catalogo/profissionais/usuarios-disponiveis/').then(function (us) {
-      if (!us.length) { toast('Não há usuários do tipo Profissional sem cadastro. Crie um no painel completo.'); return; }
+      if (!us.length) { toast('Não há usuários disponíveis para promover a profissional.'); return; }
       folha('Novo profissional', formProf(null, us));
+      var busca = document.getElementById('busca-usuario');
+      busca.addEventListener('input', function () {
+        var termo = busca.value.trim().toLowerCase();
+        var opts = busca.form.elements.usuario.options;
+        for (var i = 0; i < opts.length; i++) opts[i].hidden = termo && opts[i].text.toLowerCase().indexOf(termo) === -1;
+      });
     }, function (e) { toast(e.message); });
   }
 
   function salvarProf(form) {
     var d = new FormData(form);
     var id = form.dataset.id;
+    var erroEl = document.getElementById('form-erro');
     var corpo = {
       servicos: d.getAll('servicos').map(Number),
       intervalo_minutos: Number(d.get('intervalo_minutos')),
+      comissao_percentual: String(d.get('comissao_percentual') || '0').replace(',', '.'),
       ativo: form.elements.ativo.checked,
     };
-    if (!id) corpo.usuario = Number(d.get('usuario'));
+    var h = lerHorarios(form);
+    if (h.erro) { erroEl.innerHTML = '<div class="alert">' + esc(h.erro) + '</div>'; return; }
+    corpo.horarios = h.horarios;
+    if (!id) {
+      if (!d.get('usuario')) { erroEl.innerHTML = '<div class="alert">Selecione um usuário.</div>'; return; }
+      corpo.usuario = Number(d.get('usuario'));
+    }
     enviarForm(form, '/api/catalogo/profissionais/' + (id ? id + '/' : ''), id ? 'PATCH' : 'POST', corpo, renderProfissionais);
+  }
+
+  /* ---------- Admin: gráficos ---------- */
+  // Cores categóricas em ordem fixa (seguras para daltonismo); a partir da 8ª série vira "Outros"
+  var CORES_SERIE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
+  var COR_OUTROS = '#a3a29d';
+  var MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+
+  function isoDia(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function deIso(s) {
+    var p = s.split('-');
+    return new Date(+p[0], +p[1] - 1, +p[2]);
+  }
+
+  function ddmm(s) { var p = s.split('-'); return p[2] + '/' + p[1]; }
+
+  function renderGraficos() {
+    if (!state.graf) state.graf = { inicio: null, fim: null, profs: null, aberto: null };
+    app.innerHTML = '<div class="page-head row-head"><h1 style="font-size:clamp(34px,6vw,52px)">Gráficos</h1>' +
+      '<div class="segmented" role="tablist"><button class="seg active" role="tab" aria-selected="true">Profissionais</button></div></div>' +
+      '<div id="graf-area"><div class="loading">Carregando…</div></div><div id="graf-tip" class="graf-tip" hidden></div>';
+    carregarGraficos();
+  }
+
+  function carregarGraficos() {
+    var g = state.graf;
+    api('/api/agenda/graficos/profissionais/' + (g.inicio ? '?inicio=' + g.inicio + '&fim=' + g.fim : '')).then(function (d) {
+      g.dados = d;
+      g.inicio = d.inicio;
+      g.fim = d.fim;
+      if (!g.calMes) g.calMes = deIso(d.inicio);
+      if (!g.profs) g.profs = d.profissionais.map(function (p) { return p.id; });
+      // A cor segue o serviço (mais agendados primeiro), não a posição da fatia após o filtro
+      var qtd = {};
+      d.linhas.forEach(function (l) { qtd[l.servico] = (qtd[l.servico] || 0) + l.qtd; });
+      var ordem = d.servicos.slice().sort(function (a, b) { return (qtd[b.id] || 0) - (qtd[a.id] || 0) || a.nome.localeCompare(b.nome); });
+      var vagas = ordem.length > CORES_SERIE.length ? CORES_SERIE.length - 1 : ordem.length;
+      g.corServ = {};
+      ordem.forEach(function (s, i) { g.corServ[s.id] = i < vagas ? CORES_SERIE[i] : null; });
+      desenharGraficos();
+    }, function (e) {
+      var area = document.getElementById('graf-area');
+      if (area) area.innerHTML = '<div class="alert">' + esc(e.message) + '</div>';
+    });
+  }
+
+  /* Filtro de período: mini calendário em que o 1º clique marca o início e o 2º o fim */
+  function filtroPeriodo() {
+    var g = state.graf, aberto = g.aberto === 'periodo';
+    var h = '<div class="graf-filtro">' +
+      '<button type="button" class="graf-filtro-btn' + (aberto ? ' aberto' : '') + '" data-graf-abrir="periodo" aria-expanded="' + aberto + '">' +
+        '<span><strong>Período</strong><small>' + ddmm(g.inicio) + '/' + g.inicio.slice(0, 4) + ' até ' + ddmm(g.fim) + '/' + g.fim.slice(0, 4) + '</small></span>' + ICO.chev + '</button>';
+    if (!aberto) return h + '</div>';
+
+    var m = g.calMes, ano = m.getFullYear(), mes = m.getMonth();
+    var primeiro = new Date(ano, mes, 1), vazios = (primeiro.getDay() + 6) % 7;
+    var nDias = new Date(ano, mes + 1, 0).getDate();
+    var ini = g.selIni || g.inicio, fim = g.selIni ? null : g.fim, hoje = isoDia(new Date());
+    var cel = '';
+    for (var i = 0; i < vazios; i++) cel += '<span></span>';
+    for (var d = 1; d <= nDias; d++) {
+      var k = isoDia(new Date(ano, mes, d));
+      var cls = (k === ini || k === fim ? ' ponta' : '') + (fim && k > ini && k < fim ? ' meio' : '') + (k === hoje ? ' hoje' : '');
+      cel += '<button type="button" class="cal-dia' + cls + '" data-cal-dia="' + k + '">' + d + '</button>';
+    }
+    return h + '<div class="graf-opcoes mini-cal">' +
+      '<div class="cal-topo"><button type="button" class="cal-seta" data-cal-mes="-1" aria-label="Mês anterior">‹</button>' +
+        '<strong>' + MESES[mes] + ' ' + ano + '</strong>' +
+        '<button type="button" class="cal-seta" data-cal-mes="1" aria-label="Próximo mês">›</button></div>' +
+      '<div class="cal-grade">' + ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'].map(function (x) { return '<span class="cal-sem">' + x + '</span>'; }).join('') + cel + '</div>' +
+      '<p class="cal-dica">' + (g.selIni ? 'Agora escolha a data final.' : 'Clique na data inicial e depois na final.') + '</p>' +
+      '<div class="cal-atalhos"><button type="button" class="link" data-cal-atalho="mes">Este mês</button>' +
+        '<button type="button" class="link" data-cal-atalho="7">Últimos 7 dias</button>' +
+        '<button type="button" class="link" data-cal-atalho="30">Últimos 30 dias</button></div>' +
+      '</div></div>';
+  }
+
+  function escolherDiaCal(k) {
+    var g = state.graf;
+    if (!g.selIni) { g.selIni = k; return desenharGraficos(); }
+    var a = g.selIni < k ? g.selIni : k, b = g.selIni < k ? k : g.selIni;
+    g.selIni = null;
+    g.aberto = null;
+    aplicarPeriodo(a, b);
+  }
+
+  function atalhoPeriodo(tipo) {
+    var hoje = new Date();
+    state.graf.selIni = null;
+    state.graf.aberto = null;
+    if (tipo === 'mes') return aplicarPeriodo(isoDia(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), isoDia(new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0)));
+    aplicarPeriodo(isoDia(new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() - Number(tipo) + 1)), isoDia(hoje));
+  }
+
+  function aplicarPeriodo(a, b) {
+    var g = state.graf;
+    g.inicio = a;
+    g.fim = b;
+    g.calMes = deIso(a);
+    var area = document.getElementById('graf-area');
+    if (area) area.classList.add('carregando');
+    carregarGraficos();
+  }
+
+  function filtroProfs(marcados) {
+    var g = state.graf, aberto = g.aberto === 'profs', opcoes = g.dados.profissionais;
+    var resumo = marcados.length === opcoes.length ? 'Todos' : marcados.length ? marcados.length + ' selecionado(s)' : 'Nenhum';
+    return '<div class="graf-filtro">' +
+      '<button type="button" class="graf-filtro-btn' + (aberto ? ' aberto' : '') + '" data-graf-abrir="profs" aria-expanded="' + aberto + '">' +
+        '<span><strong>Profissionais</strong><small>' + resumo + '</small></span>' + ICO.chev + '</button>' +
+      (aberto ? '<div class="graf-opcoes" data-graf-filtro="profs">' +
+        '<label class="check-row"><input type="checkbox" data-todos' + (marcados.length === opcoes.length ? ' checked' : '') + '> Todos</label>' +
+        opcoes.map(function (o) {
+          return '<label class="check-row"><input type="checkbox" value="' + o.id + '"' +
+            (marcados.indexOf(o.id) !== -1 ? ' checked' : '') + '> ' + esc(o.nome) + '</label>';
+        }).join('') + '</div>' : '') +
+      '</div>';
+  }
+
+  function mudarFiltroGraf(input) {
+    var g = state.graf;
+    var caixa = input.closest('[data-graf-filtro]');
+    if (input.hasAttribute('data-todos')) g.profs = input.checked ? g.dados.profissionais.map(function (p) { return p.id; }) : [];
+    else g.profs = [].map.call(caixa.querySelectorAll('input[value]:checked'), function (i) { return Number(i.value); });
+    desenharGraficos();
+  }
+
+  function desenharGraficos() {
+    var g = state.graf, d = g && g.dados;
+    var area = document.getElementById('graf-area');
+    if (!area || !d) return;
+    area.classList.remove('carregando');
+    var linhas = d.linhas.filter(function (l) { return g.profs.indexOf(l.profissional) !== -1; });
+
+    // Séries por serviço: a cor segue o serviço; quem ficou sem cor entra em "Outros"
+    var chave = function (id) { return g.corServ[id] ? String(id) : 'outros'; };
+    var porServ = {}, totalQtd = 0;
+    linhas.forEach(function (l) {
+      totalQtd += l.qtd;
+      porServ[chave(l.servico)] = (porServ[chave(l.servico)] || 0) + l.qtd;
+    });
+    var series = d.servicos.filter(function (s) { return g.corServ[s.id] && porServ[s.id]; }).map(function (s) {
+      return { chave: String(s.id), nome: s.nome, cor: g.corServ[s.id] };
+    }).sort(function (a, b) { return CORES_SERIE.indexOf(a.cor) - CORES_SERIE.indexOf(b.cor); });
+    if (porServ.outros) series.push({ chave: 'outros', nome: 'Outros', cor: COR_OUTROS });
+    var fatias = series.map(function (s) { return { nome: s.nome, valor: porServ[s.chave], cor: s.cor }; });
+
+    // Colunas: um dia do período por coluna, separadas por serviço
+    var cols = [];
+    for (var dia = deIso(d.inicio); isoDia(dia) <= d.fim; dia.setDate(dia.getDate() + 1)) {
+      cols.push({ dia: isoDia(dia), rotulo: ddmm(isoDia(dia)), renda: 0, qtd: 0, partes: {} });
+    }
+    var porDia = {};
+    cols.forEach(function (c) { porDia[c.dia] = c; });
+    linhas.forEach(function (l) {
+      var c = porDia[l.dia];
+      if (!c) return;
+      c.renda += l.total;
+      c.qtd += l.qtd;
+      var p = c.partes[chave(l.servico)] || (c.partes[chave(l.servico)] = { renda: 0, qtd: 0 });
+      p.renda += l.total;
+      p.qtd += l.qtd;
+    });
+    cols.forEach(function (c) { c.ticket = c.qtd ? c.renda / c.qtd : 0; });
+
+    area.innerHTML = '<div class="graf-layout"><div class="graf-col">' + cartaoComissoes() +
+      '<section class="card graf-card"><h3>Serviços por dia</h3><p class="graf-sub">Agendamentos por serviço no período · ' + totalQtd + ' no total</p>' +
+        graficoPizza(fatias, totalQtd) + '</section>' +
+      '<section class="card graf-card"><h3>Ticket médio</h3><p class="graf-sub">Valor médio por agendamento em cada dia. Cada cor mostra quanto o serviço contribui para a média.</p>' +
+        graficoColunas(cols, 'ticket', series) + '</section>' +
+      '<section class="card graf-card"><h3>Renda por dia</h3><p class="graf-sub">Soma dos valores em cada dia, separada por serviço</p>' +
+        graficoColunas(cols, 'renda', series) + '</section>' +
+      '</div><aside class="graf-filtros">' + filtroPeriodo() + filtroProfs(g.profs) +
+        '<p class="hint">Cancelados e faltas não entram nos gráficos.</p>' +
+      '</aside></div>';
+  }
+
+  // Total a receber: comissão no período dos profissionais selecionados
+  function cartaoComissoes() {
+    var g = state.graf, d = g.dados;
+    var nomes = {};
+    d.profissionais.forEach(function (p) { nomes[p.id] = p.nome; });
+    var itens = d.comissoes.filter(function (c) { return g.profs.indexOf(c.profissional) !== -1; });
+    var total = 0, previsto = 0;
+    itens.forEach(function (c) { total += c.a_receber; previsto += c.previsto; });
+    var linhas = itens.map(function (c) {
+      return '<tr><th scope="row">' + esc(nomes[c.profissional]) + '</th>' +
+        '<td>' + c.percentual.toLocaleString('pt-BR') + '%</td>' +
+        '<td>' + brl(c.renda_concluida) + '</td>' +
+        '<td class="com-valor">' + brl(c.a_receber) + (c.previsto ? '<small>+ ' + brl(c.previsto) + ' previsto</small>' : '') + '</td></tr>';
+    }).join('');
+    return '<section class="card graf-card com-card"><h3>Total a receber</h3>' +
+      '<div class="com-total">' + brl(total) + '</div>' +
+      '<p class="graf-sub">Comissão sobre os atendimentos concluídos de ' + ddmm(d.inicio) + ' a ' + ddmm(d.fim) +
+        (previsto ? ' · mais ' + brl(previsto) + ' previsto em agendamentos ainda não finalizados' : '') + '.</p>' +
+      (linhas ? '<div class="graf-scroll"><table class="com-tabela"><thead><tr><th>Profissional</th><th>Comissão</th><th>Trabalhado</th><th>A receber</th></tr></thead>' +
+        '<tbody>' + linhas + '</tbody></table></div>' : '<div class="empty">Nenhum profissional selecionado.</div>') +
+      '</section>';
+  }
+
+  function graficoPizza(fatias, total) {
+    if (!total) return '<div class="empty">Nenhum agendamento para os filtros escolhidos.</div>';
+    var R = 100, C = 110, ang = -Math.PI / 2;
+    var svg = fatias.map(function (f) {
+      var pct = f.valor / total;
+      var tip = esc(f.nome + '|' + f.valor + ' agendamento(s) · ' + Math.round(pct * 100) + '%');
+      if (pct >= 0.9999) return '<circle cx="' + C + '" cy="' + C + '" r="' + R + '" fill="' + f.cor + '" data-tip="' + tip + '"/>';
+      var a2 = ang + pct * 2 * Math.PI;
+      var p = 'M' + C + ' ' + C + 'L' + (C + R * Math.cos(ang)).toFixed(2) + ' ' + (C + R * Math.sin(ang)).toFixed(2) +
+        'A' + R + ' ' + R + ' 0 ' + (pct > 0.5 ? 1 : 0) + ' 1 ' + (C + R * Math.cos(a2)).toFixed(2) + ' ' + (C + R * Math.sin(a2)).toFixed(2) + 'Z';
+      ang = a2;
+      return '<path d="' + p + '" fill="' + f.cor + '" data-tip="' + tip + '"/>';
+    }).join('');
+    var legenda = fatias.map(function (f) {
+      return '<li><span class="graf-chip" style="background:' + f.cor + '"></span><span class="graf-leg-nome">' + esc(f.nome) +
+        '</span><span class="graf-leg-val">' + f.valor + ' · ' + Math.round(f.valor / total * 100) + '%</span></li>';
+    }).join('');
+    return '<div class="graf-pizza"><svg viewBox="0 0 220 220" role="img" aria-label="Gráfico de pizza: agendamentos por serviço">' +
+      '<g class="graf-fatias">' + svg + '</g></svg><ul class="graf-legenda">' + legenda + '</ul></div>';
+  }
+
+  function tetoBonito(v) {
+    if (v <= 0) return 1;
+    var e = Math.pow(10, Math.floor(Math.log10(v))), m = v / e;
+    return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * e;
+  }
+
+  function brlCurto(v) {
+    if (v >= 1000) return 'R$ ' + (v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' mil';
+    return 'R$ ' + Math.round(v).toLocaleString('pt-BR');
+  }
+
+  // Valor do segmento de um serviço: na renda é a soma; no ticket é a contribuição
+  // do serviço para a média do dia (renda do serviço / agendamentos do dia), então
+  // os segmentos somam exatamente o ticket médio.
+  function valorParte(c, p, campo) {
+    return campo === 'renda' ? p.renda : (c.qtd ? p.renda / c.qtd : 0);
+  }
+
+  function graficoColunas(cols, campo, series) {
+    if (!cols.some(function (c) { return c.qtd; })) return '<div class="empty">Nenhum agendamento para os filtros escolhidos.</div>';
+    var W = 560, H = 240, L = 64, T = 22, B = 30, Rm = 8, GAP = 2;
+    var valores = cols.map(function (c) { return c[campo]; });
+    var max = Math.max.apply(null, valores);
+    var teto = tetoBonito(max), alt = H - T - B, banda = (W - L - Rm) / cols.length;
+    var larg = Math.max(1, Math.min(36, banda * 0.7)), base = T + alt;
+    var passoRotulo = Math.ceil(cols.length / 10);  // no máximo ~10 datas no eixo
+    var grade = [0, 0.25, 0.5, 0.75, 1].map(function (f) {
+      var yy = (base - f * alt).toFixed(1);
+      return '<line x1="' + L + '" x2="' + (W - Rm) + '" y1="' + yy + '" y2="' + yy + '" class="' + (f ? 'graf-grade' : 'graf-base') + '"/>' +
+        '<text x="' + (L - 8) + '" y="' + yy + '" class="graf-eixo" text-anchor="end" dominant-baseline="middle">' + brlCurto(teto * f) + '</text>';
+    }).join('');
+    var iMax = max > 0 ? valores.indexOf(max) : -1;
+    var barras = cols.map(function (c, i) {
+      var cx = L + banda * i + banda / 2, x = cx - larg / 2, v = c[campo];
+      var segs = series.filter(function (s) { return c.partes[s.chave] && valorParte(c, c.partes[s.chave], campo) > 0; });
+      var y = base;
+      var blocos = segs.map(function (s, j) {
+        var p = c.partes[s.chave], val = valorParte(c, p, campo);
+        var h = Math.max(1, alt * val / teto), topo = y - h;
+        // 2px de respiro entre segmentos; cantos de 4px só no topo da coluna
+        var baixo = j ? y - Math.min(GAP, h / 2) : y;
+        var forma;
+        if (j === segs.length - 1) {
+          var r = Math.min(4, baixo - topo, larg / 2);
+          forma = '<path d="M' + x.toFixed(1) + ' ' + baixo.toFixed(1) + 'V' + (topo + r).toFixed(1) +
+            'Q' + x.toFixed(1) + ' ' + topo.toFixed(1) + ' ' + (x + r).toFixed(1) + ' ' + topo.toFixed(1) +
+            'H' + (x + larg - r).toFixed(1) + 'Q' + (x + larg).toFixed(1) + ' ' + topo.toFixed(1) + ' ' + (x + larg).toFixed(1) + ' ' + (topo + r).toFixed(1) +
+            'V' + baixo.toFixed(1) + 'Z" fill="' + s.cor + '"/>';
+        } else {
+          forma = '<rect x="' + x.toFixed(1) + '" y="' + topo.toFixed(1) + '" width="' + larg.toFixed(1) +
+            '" height="' + Math.max(0, baixo - topo).toFixed(1) + '" fill="' + s.cor + '"/>';
+        }
+        y = topo;
+        var tip = campo === 'renda'
+          ? s.nome + ' · ' + c.rotulo + '|' + brl(val) + ' de ' + brl(v) + '|' + p.qtd + ' agendamento(s)'
+          : s.nome + ' · ' + c.rotulo + '|Contribui ' + brl(val) + ' do ticket de ' + brl(v) +
+            '|Média do serviço: ' + brl(p.renda / p.qtd) + ' (' + p.qtd + ' agend.)';
+        return '<g class="graf-seg" data-tip="' + esc(tip) + '">' + forma + '</g>';
+      }).join('');
+      var rotulo = i === iMax ? '<text x="' + cx.toFixed(1) + '" y="' + (y - 7).toFixed(1) + '" class="graf-valor" text-anchor="middle">' + brlCurto(v) + '</text>' : '';
+      var resumo = c.rotulo + '|' + (campo === 'renda' ? 'Total: ' : 'Ticket médio: ') + brl(v) + '|' +
+        (c.qtd ? c.qtd + ' agendamento(s)' : 'Sem agendamentos');
+      var eixo = i % passoRotulo === 0 ? '<text x="' + cx.toFixed(1) + '" y="' + (H - 8) + '" class="graf-eixo" text-anchor="middle">' + c.rotulo + '</text>' : '';
+      // Área de hover é a faixa inteira do dia, maior que a coluna; cada segmento tem o seu próprio detalhe
+      return '<g class="graf-coluna" data-tip="' + esc(resumo) + '">' +
+        '<rect x="' + (L + banda * i).toFixed(1) + '" y="' + T + '" width="' + banda.toFixed(1) + '" height="' + alt + '" class="graf-alvo"/>' +
+        blocos + rotulo + eixo + '</g>';
+    }).join('');
+    var legenda = series.length ? '<ul class="graf-legenda-linha">' + series.map(function (s) {
+      return '<li><span class="graf-chip" style="background:' + s.cor + '"></span>' + esc(s.nome) + '</li>';
+    }).join('') + '</ul>' : '';
+    return '<div class="graf-scroll"><svg viewBox="0 0 ' + W + ' ' + H + '" class="graf-svg" role="img">' + grade + barras + '</svg></div>' + legenda;
+  }
+
+  function mostrarTip(ev) {
+    var tip = document.getElementById('graf-tip');
+    if (!tip) return;
+    var alvo = ev.target.closest && ev.target.closest('[data-tip]');
+    if (!alvo) { tip.hidden = true; return; }
+    var partes = alvo.getAttribute('data-tip').split('|');
+    tip.innerHTML = '<strong>' + esc(partes[0]) + '</strong>' +
+      partes.slice(1).map(function (t) { return '<span>' + esc(t) + '</span>'; }).join('');
+    tip.hidden = false;
+    var x = ev.clientX + 14, w = tip.offsetWidth;
+    if (x + w > window.innerWidth - 8) x = ev.clientX - w - 14;
+    tip.style.left = x + 'px';
+    tip.style.top = (ev.clientY + 14) + 'px';
   }
 
   function render() {
@@ -556,11 +962,11 @@
     if (!state.user) return renderHome();
     var tipo = state.user.tipo;
     if (state.view === 'perfil') return renderPerfil();
-    if (state.view === 'seguranca') return renderSeguranca();
     if (state.view === 'integracoes') return renderIntegracoes();
     if (state.view === 'planos') return renderPlanos();
     if (tipo === 'admin' && state.view === 'servicos') return renderServicos();
     if (tipo === 'admin' && state.view === 'profissionais') return renderProfissionais();
+    if (tipo === 'admin' && state.view === 'graficos') return renderGraficos();
     if (state.view === 'meus') return renderMeus();
     if (tipo !== 'cliente') { state.view = 'meus'; return renderMeus(); }
     if (state.confirmado) return renderSucesso();
@@ -778,8 +1184,8 @@
         pf('bairro', 'Bairro', u.bairro, 'autocomplete="address-level3"') +
         pf('estado', 'Estado', u.estado, 'autocomplete="address-level1" maxlength="2" placeholder="UF" style="text-transform:uppercase"') +
         '<div class="link-cards">' +
-          '<button type="button" class="card-link" data-go="seguranca">' + ICO.shield +
-            '<span class="t"><strong>Segurança da conta</strong><small>Senha, autenticação em dois fatores</small></span>' + ICO.chev + '</button>' +
+          '<button type="button" class="card-link" data-action="alterar-senha">' + ICO.key +
+            '<span class="t"><strong>Alterar senha</strong><small>Troque a senha de acesso à sua conta</small></span>' + ICO.chev + '</button>' +
           '<button type="button" class="card-link" data-go="integracoes">' + ICO.gear +
             '<span class="t"><strong>Integrações</strong><small>Google Agenda</small></span>' + ICO.chev + '</button>' +
           '<button type="button" class="card-link" id="btn-notif" role="switch" data-action="notif" aria-checked="' + (notifAtiva() ? 'true' : 'false') + '">' + ICO.bell +
@@ -843,7 +1249,7 @@
   }
 
   /* ============================================================
-     SEGURANÇA DA CONTA
+     ALTERAR SENHA
   ============================================================ */
   function erroSheet(msg) {
     var e = document.getElementById('form-erro');
@@ -861,115 +1267,6 @@
       erroSheet(e.message);
       btn.disabled = false;
     });
-  }
-
-  function campoCodigo(id) {
-    return '<div class="field"><label for="' + id + '">Código de 6 dígitos</label>' +
-      '<input id="' + id + '" name="codigo" class="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" data-mask="cod"></div>';
-  }
-
-  function renderSeguranca() {
-    app.innerHTML = barraTopo('Segurança da conta', 'perfil') +
-      '<div class="stack">' +
-        '<section class="card" id="card-2fa"><p class="hint center">Carregando…</p></section>' +
-        '<section class="card">' +
-          '<div class="card-head"><span class="plain-ico">' + ICO.lock + '</span>' +
-            '<div class="grow"><h3>Senha</h3><p>Altere sua senha de acesso</p></div></div>' +
-          '<button class="btn outline block" data-action="alterar-senha">' + ICO.key + 'Alterar Senha</button>' +
-        '</section>' +
-        '<section class="card">' +
-          '<div class="card-head"><span class="plain-ico">' + ICO.laptop + '</span>' +
-            '<div class="grow"><h3>Sessões Ativas</h3><p>Gerencie os dispositivos conectados à sua conta</p></div></div>' +
-          '<div id="lista-sessoes"><p class="hint center">Carregando…</p></div>' +
-        '</section>' +
-      '</div>';
-    carregar2fa();
-    carregarSessoes();
-  }
-
-  /* ---------- Autenticação em dois fatores ---------- */
-  function desenhar2fa(ativo) {
-    var el = document.getElementById('card-2fa');
-    if (!el) return;
-    el.innerHTML =
-      '<div class="card-head">' +
-        '<span class="ico-badge ' + (ativo ? 'ok' : 'warn') + '">' + (ativo ? ICO.shieldOk : ICO.warn) + '</span>' +
-        '<div class="grow"><h3>Autenticação em Dois Fatores</h3><p>' +
-          (ativo
-            ? 'Sua conta está protegida. A cada novo login vamos pedir o código do seu aplicativo autenticador.'
-            : 'Adicione uma camada extra de segurança à sua conta usando um aplicativo autenticador como Google Authenticator ou Authy.') +
-        '</p></div>' +
-        '<span class="badge ' + (ativo ? 'concluido' : 'aviso') + '">' + (ativo ? 'Ativo' : 'Inativo') + '</span>' +
-      '</div>' +
-      (ativo
-        ? '<button class="btn outline-danger block" data-action="2fa-desativar">Desativar</button>'
-        : '<button class="btn block" data-action="2fa-ativar">Ativar</button>');
-  }
-
-  function carregar2fa() {
-    var el = document.getElementById('card-2fa');
-    if (el) el.innerHTML = '<p class="hint center">Carregando…</p>';
-    api('/api/auth/2fa/').then(function (r) {
-      desenhar2fa(!!(r && r.ativo));
-    }, function (e) {
-      var c = document.getElementById('card-2fa');
-      if (c) c.innerHTML = '<div class="alert">' + esc(e.message) + '</div>' +
-        '<button class="btn outline block" data-action="2fa-recarregar">Tentar novamente</button>';
-    });
-  }
-
-  function corpo2fa(r) {
-    var chave = String(r.secret || '').replace(/\s+/g, '');
-    var agrupada = chave.replace(/(.{4})/g, '$1 ').trim();
-    var qr = (typeof r.qr === 'string' && /^data:image\/(png|jpeg|svg\+xml);/.test(r.qr)) ? r.qr : '';
-    var uri = (typeof r.otpauth_url === 'string' && /^otpauth:\/\//.test(r.otpauth_url)) ? r.otpauth_url : '';
-    return '<ol class="passos">' +
-        '<li>Instale um aplicativo autenticador, como Google Authenticator ou Authy.</li>' +
-        '<li>' + (qr ? 'Escaneie o QR code ou digite a chave abaixo.' : 'Adicione uma conta digitando a chave abaixo.') + '</li>' +
-        '<li>Digite aqui o código de 6 dígitos que o aplicativo mostrar.</li>' +
-      '</ol>' +
-      (qr ? '<div class="qr"><img src="' + esc(qr) + '" alt="QR code para o aplicativo autenticador"></div>' : '') +
-      '<div class="chave"><code id="chave-2fa" data-chave="' + esc(chave) + '">' + esc(agrupada) + '</code>' +
-        '<button type="button" class="btn ghost small" data-action="copiar-chave">Copiar</button></div>' +
-      (uri ? '<a class="link link-centro" href="' + esc(uri) + '">Abrir no aplicativo autenticador</a>' : '') +
-      '<form id="form-2fa-ativar" novalidate><div id="form-erro"></div>' + campoCodigo('f-cod-ativar') +
-        '<button class="btn block" type="submit">Confirmar e ativar</button></form>';
-  }
-
-  function iniciar2fa(btn) {
-    btn.disabled = true;
-    api('/api/auth/2fa/configurar/', { method: 'POST' }).then(function (r) {
-      btn.disabled = false;
-      if (!r || !r.secret) throw new ApiError(500, { detail: 'O servidor não devolveu a chave do autenticador.' });
-      folha('Ativar dois fatores', corpo2fa(r));
-    }).catch(function (e) {
-      btn.disabled = false;
-      toast(e.message);
-    });
-  }
-
-  function copiarChave() {
-    var chave = document.getElementById('chave-2fa').dataset.chave;
-    var manual = function () { toast('Não foi possível copiar. Selecione a chave e copie manualmente.'); };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(chave).then(function () { toast('Chave copiada.'); }, manual);
-    } else manual();
-  }
-
-  function confirmar2fa(form, ativar) {
-    var codigo = mascaraCodigo(form.elements.codigo.value);
-    if (codigo.length !== 6) return erroSheet('Digite o código de 6 dígitos.');
-    enviarSheet(form, ativar ? '/api/auth/2fa/ativar/' : '/api/auth/2fa/desativar/', 'POST', { codigo: codigo }, function () {
-      toast(ativar ? 'Autenticação em dois fatores ativada.' : 'Autenticação em dois fatores desativada.');
-      desenhar2fa(ativar);
-    });
-  }
-
-  function abrirDesativar2fa() {
-    folha('Desativar dois fatores',
-      '<p class="form-nota">Para desativar, digite o código de 6 dígitos do seu aplicativo autenticador.</p>' +
-      '<form id="form-2fa-desativar" novalidate><div id="form-erro"></div>' + campoCodigo('f-cod-desativar') +
-      '<button class="btn danger block" type="submit">Desativar</button></form>');
   }
 
   /* ---------- Alterar senha ---------- */
@@ -990,69 +1287,6 @@
     if (nova === atual) return erroSheet('A nova senha precisa ser diferente da atual.');
     enviarSheet(form, '/api/auth/alterar-senha/', 'POST', { senha_atual: atual, nova_senha: nova }, function () {
       toast('Senha alterada com sucesso.');
-    });
-  }
-
-  /* ---------- Sessões ativas ---------- */
-  function carregarSessoes() {
-    api('/api/auth/sessoes/').then(function (d) {
-      desenharSessoes(lista(d));
-    }, function (e) {
-      var box = document.getElementById('lista-sessoes');
-      if (box) box.innerHTML = '<div class="alert">' + esc(e.message) + '</div>' +
-        '<button class="btn outline block" data-action="sessoes-recarregar">Tentar novamente</button>';
-    });
-  }
-
-  function desenharSessoes(itens) {
-    var box = document.getElementById('lista-sessoes');
-    if (!box) return;
-    itens = itens.slice().sort(function (a, b) {
-      if (!!a.atual !== !!b.atual) return a.atual ? -1 : 1;
-      return new Date(b.ultimo_acesso) - new Date(a.ultimo_acesso);
-    });
-    if (!itens.length) { box.innerHTML = '<p class="hint center">Nenhuma sessão ativa encontrada.</p>'; return; }
-    var outras = itens.filter(function (s) { return !s.atual; }).length;
-
-    box.innerHTML = '<div class="sessoes">' + itens.map(function (s) {
-      var movel = /android|ios|iphone|ipad|mobile/i.test(s.dispositivo || '');
-      return '<div class="sessao' + (s.atual ? ' atual' : '') + '">' +
-        '<span class="sessao-ico">' + (movel ? ICO.phone : ICO.desktop) + '</span>' +
-        '<div class="sessao-info">' +
-          '<strong>' + esc(s.dispositivo || 'dispositivo') + (s.atual ? '<span class="badge concluido">Este dispositivo</span>' : '') + '</strong>' +
-          '<span>' + esc(s.descricao) + '</span>' +
-          '<small>IP: ' + esc(s.ip) + ' • ' + esc(haTempo(s.ultimo_acesso)) + '</small>' +
-        '</div>' +
-        (s.atual ? '' : '<button class="btn outline-danger small" data-sessao="' + esc(s.id) + '">Encerrar</button>') +
-      '</div>';
-    }).join('') + '</div>' +
-    (outras
-      ? '<button class="btn outline-danger block" data-action="encerrar-outras">' + ICO.logout + 'Sair de todos os outros dispositivos</button>' +
-        '<p class="nota">Ao sair de todos os outros dispositivos, essa sessão continuará ativa.</p>'
-      : '');
-  }
-
-  function encerrarSessao(id, btn) {
-    if (!window.confirm('Encerrar esta sessão? O dispositivo será desconectado.')) return;
-    btn.disabled = true;
-    api('/api/auth/sessoes/' + encodeURIComponent(id) + '/', { method: 'DELETE' }).then(function () {
-      toast('Sessão encerrada.');
-      carregarSessoes();
-    }, function (e) {
-      toast(e.message);
-      btn.disabled = false;
-    });
-  }
-
-  function encerrarOutras(btn) {
-    if (!window.confirm('Sair de todos os outros dispositivos? Esta sessão continuará ativa.')) return;
-    btn.disabled = true;
-    api('/api/auth/sessoes/encerrar-outras/', { method: 'POST' }).then(function () {
-      toast('Os outros dispositivos foram desconectados.');
-      carregarSessoes();
-    }, function (e) {
-      toast(e.message);
-      btn.disabled = false;
     });
   }
 
@@ -1470,13 +1704,6 @@
     if (el.dataset.action === 'foto') return document.getElementById('foto-input').click();
     if (el.dataset.action === 'notif') return alternarNotif();
     if (el.dataset.action === 'alterar-senha') return folha('Alterar senha', formSenha());
-    if (el.dataset.action === '2fa-ativar') return iniciar2fa(el);
-    if (el.dataset.action === '2fa-desativar') return abrirDesativar2fa();
-    if (el.dataset.action === '2fa-recarregar') return carregar2fa();
-    if (el.dataset.action === 'copiar-chave') return copiarChave();
-    if (el.dataset.action === 'sessoes-recarregar') return carregarSessoes();
-    if (el.dataset.action === 'encerrar-outras') return encerrarOutras(el);
-    if (el.dataset.sessao) return encerrarSessao(el.dataset.sessao, el);
     if (el.dataset.action === 'google-conectar') return conectarGoogle(el);
     if (el.dataset.action === 'google-remover') return removerGoogle(el);
     if (el.dataset.action === 'google-recarregar') return carregarGoogle();
@@ -1489,6 +1716,21 @@
     }
     if (el.dataset.action === 'novo-prof') return abrirProf(null);
     if (el.dataset.action === 'editar-prof') return abrirProf(Number(el.dataset.id));
+    if (el.dataset.action === 'remover-prof') return removerProf(Number(el.dataset.id), el);
+    if (el.dataset.action === 'add-janela') return addJanela(el);
+    if (el.dataset.action === 'rm-janela') return rmJanela(el);
+    if (el.dataset.grafAbrir) {
+      state.graf.aberto = state.graf.aberto === el.dataset.grafAbrir ? null : el.dataset.grafAbrir;
+      state.graf.selIni = null;
+      return desenharGraficos();
+    }
+    if (el.dataset.calDia) return escolherDiaCal(el.dataset.calDia);
+    if (el.dataset.calMes) {
+      var cm = state.graf.calMes;
+      state.graf.calMes = new Date(cm.getFullYear(), cm.getMonth() + Number(el.dataset.calMes), 1);
+      return desenharGraficos();
+    }
+    if (el.dataset.calAtalho) return atalhoPeriodo(el.dataset.calAtalho);
     if (el.dataset.action === 'fechar') return fecharSheet();
     if (el.dataset.sheet) return abrirSheet(el.dataset.sheet);
     if (el.dataset.prof) return escolherProf(Number(el.dataset.prof));
@@ -1521,7 +1763,11 @@
 
   document.addEventListener('change', function (ev) {
     if (ev.target.id === 'foto-input') trocarFoto(ev.target);
+    if (ev.target.closest('[data-graf-filtro]')) mudarFiltroGraf(ev.target);
+    if (ev.target.hasAttribute('data-dia-ativo')) marcarDiaTrab(ev.target);
   });
+
+  document.addEventListener('mousemove', mostrarTip);
 
   document.addEventListener('submit', function (ev) {
     var fid = ev.target.id;
@@ -1531,8 +1777,6 @@
     else if (fid === 'form-prof') { ev.preventDefault(); salvarProf(ev.target); }
     else if (fid === 'form-perfil') { ev.preventDefault(); salvarPerfil(ev.target); }
     else if (fid === 'form-senha') { ev.preventDefault(); salvarSenha(ev.target); }
-    else if (fid === 'form-2fa-ativar') { ev.preventDefault(); confirmar2fa(ev.target, true); }
-    else if (fid === 'form-2fa-desativar') { ev.preventDefault(); confirmar2fa(ev.target, false); }
   });
 
   /* ------------------------------------------------------------

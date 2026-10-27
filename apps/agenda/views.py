@@ -1,6 +1,9 @@
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 
 from django.conf import settings
+from django.db.models import Count, Sum
+from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -128,3 +131,77 @@ class DisponibilidadeView(APIView):
             for h in horarios_livres(profissional, servico, dia)
         ]
         return Response({'data': dia.isoformat(), 'horarios': horarios})
+
+
+class GraficoProfissionaisView(APIView):
+    """Dados dos gráficos do admin num período (?inicio=AAAA-MM-DD&fim=AAAA-MM-DD,
+    padrão: mês atual; as duas datas entram no período).
+
+    'linhas': agendamentos confirmados/concluídos somados por profissional, dia e
+    serviço. O filtro por profissional é feito no navegador, em cima delas.
+    'comissoes': por profissional, 'a_receber' é a comissão sobre os atendimentos
+    concluídos e 'previsto' sobre os confirmados que ainda não foram finalizados.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.tipo != 'admin':
+            return Response({'detail': 'Apenas administradores.'}, status=status.HTTP_403_FORBIDDEN)
+
+        hoje = timezone.localdate()
+        try:
+            inicio = date.fromisoformat(request.query_params['inicio'])
+            fim = date.fromisoformat(request.query_params['fim'])
+        except (KeyError, ValueError):
+            inicio = hoje.replace(day=1)
+            fim = (inicio + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        if fim < inicio:
+            inicio, fim = fim, inicio
+
+        tz = timezone.get_current_timezone()
+        qs = Agendamento.objects.filter(
+            inicio__gte=timezone.make_aware(datetime.combine(inicio, time.min), tz),
+            inicio__lt=timezone.make_aware(datetime.combine(fim + timedelta(days=1), time.min), tz),
+            status__in=[Agendamento.Status.CONFIRMADO, Agendamento.Status.CONCLUIDO],
+        )
+        linhas = (
+            qs.annotate(dia=TruncDate('inicio', tzinfo=tz))
+            .values('profissional', 'dia', 'servico', 'status')
+            .annotate(qtd=Count('id'), total=Sum('preco_cobrado'))
+            .order_by()
+        )
+
+        profissionais = list(Profissional.objects.select_related('usuario'))
+        somas = {}  # (profissional, status) -> renda
+        saida = []
+        for l in linhas:
+            total = l['total'] or Decimal('0')
+            chave = (l['profissional'], l['status'])
+            somas[chave] = somas.get(chave, Decimal('0')) + total
+            saida.append({
+                'profissional': l['profissional'], 'dia': l['dia'].isoformat(), 'servico': l['servico'],
+                'qtd': l['qtd'], 'total': float(total),
+            })
+
+        comissoes = []
+        for p in profissionais:
+            fator = p.comissao_percentual / 100
+            concluida = somas.get((p.id, Agendamento.Status.CONCLUIDO), Decimal('0'))
+            confirmada = somas.get((p.id, Agendamento.Status.CONFIRMADO), Decimal('0'))
+            comissoes.append({
+                'profissional': p.id,
+                'percentual': float(p.comissao_percentual),
+                'renda_concluida': float(concluida),
+                'a_receber': float((concluida * fator).quantize(Decimal('0.01'))),
+                'previsto': float((confirmada * fator).quantize(Decimal('0.01'))),
+            })
+
+        return Response({
+            'inicio': inicio.isoformat(),
+            'fim': fim.isoformat(),
+            'profissionais': [{'id': p.id, 'nome': p.usuario.nome} for p in profissionais],
+            'servicos': [{'id': s.id, 'nome': s.nome} for s in Servico.objects.all()],
+            'linhas': saida,
+            'comissoes': comissoes,
+        })
