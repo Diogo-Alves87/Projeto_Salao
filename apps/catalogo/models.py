@@ -34,14 +34,6 @@ class Profissional(models.Model):
         validators=[MinValueValidator(5), MaxValueValidator(120)],
         help_text='De quanto em quanto tempo os horários são oferecidos. Padrão: 15.',
     )
-    comissao_percentual = models.DecimalField(
-        'comissão (%)',
-        max_digits=5,
-        decimal_places=2,
-        default=0,
-        validators=[MinValueValidator(0), MaxValueValidator(100)],
-        help_text='Porcentagem do valor dos serviços que fica com o profissional.',
-    )
     ativo = models.BooleanField('ativo', default=True)
 
     class Meta:

@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 from django.utils import timezone
@@ -41,24 +40,6 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField('acesso ao admin', default=False)
     date_joined = models.DateTimeField('cadastrado em', default=timezone.now)
 
-    # Dados pessoais (cpf e cep guardam só dígitos)
-    cpf = models.CharField('CPF', max_length=11, unique=True, null=True, blank=True)
-    data_nascimento = models.DateField('data de nascimento', null=True, blank=True)
-    foto = models.ImageField('foto', upload_to='fotos/', blank=True)
-
-    # Endereço
-    cep = models.CharField('CEP', max_length=8, blank=True)
-    rua = models.CharField(max_length=150, blank=True)
-    numero = models.CharField('número', max_length=20, blank=True)
-    complemento = models.CharField(max_length=100, blank=True)
-    bairro = models.CharField(max_length=100, blank=True)
-    cidade = models.CharField(max_length=100, blank=True)
-    estado = models.CharField('UF', max_length=2, blank=True)
-
-    # Autenticação em dois fatores
-    totp_secret = models.CharField(max_length=32, blank=True)
-    totp_ativo = models.BooleanField('2FA ativo', default=False)
-
     objects = UsuarioManager()
 
     USERNAME_FIELD = 'email'
@@ -70,30 +51,3 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return f'{self.nome} ({self.email})'
-
-
-class Sessao(models.Model):
-    """Um login (par access/refresh) de um dispositivo."""
-
-    usuario = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sessoes'
-    )
-    dispositivo = models.CharField(max_length=80)
-    descricao = models.CharField(max_length=120, blank=True)
-    ip = models.GenericIPAddressField(null=True, blank=True)
-    criado_em = models.DateTimeField(default=timezone.now)
-    ultimo_acesso = models.DateTimeField(default=timezone.now)
-    expira_em = models.DateTimeField()
-    revogada = models.BooleanField(default=False)
-
-    class Meta:
-        verbose_name = 'sessão'
-        verbose_name_plural = 'sessões'
-        ordering = ['-ultimo_acesso']
-
-    def __str__(self):
-        return f'{self.usuario} · {self.dispositivo}'
-
-    @classmethod
-    def ativas(cls):
-        return cls.objects.filter(revogada=False, expira_em__gt=timezone.now())

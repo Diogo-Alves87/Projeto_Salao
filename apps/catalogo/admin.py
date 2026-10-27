@@ -20,7 +20,7 @@ class HorarioTrabalhoInline(admin.TabularInline):
 
 @admin.register(Profissional)
 class ProfissionalAdmin(admin.ModelAdmin):
-    list_display = ('usuario', 'intervalo_minutos', 'comissao_percentual', 'ativo')
+    list_display = ('usuario', 'intervalo_minutos', 'ativo')
     list_filter = ('ativo',)
     filter_horizontal = ('servicos',)
     inlines = [HorarioTrabalhoInline]

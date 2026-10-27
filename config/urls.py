@@ -1,8 +1,8 @@
 from django.contrib import admin
+from django.urls import path
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django.urls import include, path
 from django.views.generic import TemplateView
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -12,5 +12,4 @@ urlpatterns = [
     path('api/catalogo/', include('apps.catalogo.urls')),
     path('api/agenda/', include('apps.agenda.urls')),
     path('', TemplateView.as_view(template_name='index.html'), name='home'),
-    path('api/auth/', include('apps.usuarios.urls')),
 ]
